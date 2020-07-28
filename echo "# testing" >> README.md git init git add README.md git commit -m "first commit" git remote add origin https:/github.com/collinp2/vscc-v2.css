@@ -1,0 +1,101 @@
+@charset "utf-8";
+/* CSS Document */
+
+body {
+	font-family:Arial, Helvetica, sans-serif;
+	width:100%;	
+	background-color: #eee !important;
+	margin:0 auto;
+	/* background-image:url(/images/logos/newconfirm.jpg);
+	background-repeat:repeat-x; */
+	font-size:14px;
+}
+
+form {
+	width:1080px;
+	background-color:#fff;
+	margin:0 auto;
+	margin-top: 60px;
+	margin-bottom:60px;
+	padding:15px;
+	/* -webkit-box-shadow: 5px 5px 5px rgba(30, 30, 30, 0.10);
+	-moz-box-shadow:    5px 5px 5px rgba(30, 30, 30, 0.10);
+	box-shadow:         5px 5px 5px rgba(30, 30, 30, 0.10);
+	-webkit-border-radius: 5px;
+	-moz-border-radius: 5px; */
+	border-radius: 5px;
+	border: 1px solid #ccc;
+}
+#header {
+	width:100%;
+	background-color:#f2f2f2 !important;
+	text-align:center;	
+}
+#DynamicFormPanel table td {
+	padding-bottom:10px;
+	vertical-align:top;
+}
+
+h1 {
+	font-size: 40px;
+	color: #9D2235;
+}
+h2 {
+	margin-top: 40px;
+	padding-top: 10px;
+	border-top: 3px solid #001a72;
+	font-size: 18px;
+	color: #001a72;
+}
+h3 {
+	border-bottom:1px solid #ccc;
+	font-size:18px;	
+}
+
+h4 {
+	color:#000990;
+	font-size:16px;
+}
+
+p, label {
+	font-size:13px;
+	line-height:20px;
+}
+
+
+input[type=text], input[type=submit], input[type=button], select {
+	-webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+	padding: 6px !important;
+	border-radius: 3px;
+	border: 1px solid #ccc;
+}
+
+.small {
+	font-size:13px;
+}
+
+.example {
+	background-color:#eee;
+	font-size:12px;
+	border: 1px solid #ddd;
+	margin:10px 0px;	
+}
+
+.example p {
+	margin:0px 4px 0px 0px;	
+}
+
+.labelRight {
+	text-align:right;
+	padding-right:15px;	
+}
+
+#UpdateInfoPanel:after {
+  content: ".";
+  display: block;
+  height: 0;
+  clear: both;
+  visibility: hidden; }
+
