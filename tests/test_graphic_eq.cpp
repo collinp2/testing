@@ -1,10 +1,9 @@
 #include "test_framework.h"
-#include "dsp/GraphicEQ.h"
+#include "GraphicEQ.h"
 #include <cmath>
 #include <vector>
 
 TEST(graphiceq_flat_response_passthrough) {
-    // With all bands at 0 dB the EQ should pass audio through unchanged.
     GraphicEQ eq;
     eq.prepare(44100.0, 512);
 
@@ -69,7 +68,6 @@ TEST(graphiceq_flatten) {
 }
 
 TEST(graphiceq_boost_audible) {
-    // Boosting the 1 kHz band should increase signal level at 1 kHz.
     GraphicEQ eq;
     eq.prepare(44100.0, 512);
     eq.setBandGain(8, 12.0); // Band 8 = 1 kHz
@@ -87,7 +85,6 @@ TEST(graphiceq_boost_audible) {
     float* bufs[1] = { buf.data() };
     eq.processBlock(bufs, 1, total);
 
-    // Measure RMS over the last portion
     double sumSqIn = 0.0, sumSqOut = 0.0;
     for (int i = settle; i < total; ++i) {
         sumSqIn += orig[i] * orig[i];
@@ -97,12 +94,10 @@ TEST(graphiceq_boost_audible) {
     double rmsOut = std::sqrt(sumSqOut / measure);
     double gainDB = 20.0 * std::log10(rmsOut / rmsIn);
 
-    // Should be close to +12 dB
     ASSERT_NEAR(gainDB, 12.0, 1.0);
 }
 
 TEST(graphiceq_mono_processing) {
-    // Should handle single-channel processing without issues.
     GraphicEQ eq;
     eq.prepare(44100.0, 256);
     eq.setBandGain(4, 3.0);
@@ -111,7 +106,6 @@ TEST(graphiceq_mono_processing) {
     float* bufs[1] = { buf.data() };
     eq.processBlock(bufs, 1, 256);
 
-    // Just verify it doesn't crash and output isn't all zeros
     bool hasNonZero = false;
     for (float v : buf) {
         if (std::fabs(v) > 1e-10) { hasNonZero = true; break; }
@@ -124,7 +118,6 @@ TEST(graphiceq_reset_clears_state) {
     eq.prepare(44100.0, 512);
     eq.setBandGain(5, 12.0);
 
-    // Process some audio
     std::vector<float> buf(512);
     for (int i = 0; i < 512; ++i)
         buf[i] = static_cast<float>(std::sin(2.0 * M_PI * 250.0 * i / 44100.0));
@@ -133,7 +126,6 @@ TEST(graphiceq_reset_clears_state) {
 
     eq.reset();
 
-    // After reset, processing silence should give silence
     std::vector<float> silence(512, 0.0f);
     float* silBufs[1] = { silence.data() };
     eq.processBlock(silBufs, 1, 512);

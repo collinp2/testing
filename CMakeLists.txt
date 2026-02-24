@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.22)
 project(GEQ12 VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -7,59 +7,88 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ---------------------------------------------------------------------------
 # Options
 # ---------------------------------------------------------------------------
-option(GEQ12_BUILD_AAX   "Build AAX plugin (requires AAX SDK)" OFF)
-option(GEQ12_BUILD_TESTS "Build unit tests" ON)
-set(AAX_SDK_PATH "" CACHE PATH "Path to the Avid AAX SDK")
+option(GEQ12_BUILD_PLUGIN "Build VST3 plugin (requires JUCE)" ON)
+option(GEQ12_BUILD_TESTS  "Build DSP unit tests (no JUCE needed)" ON)
+set(JUCE_PATH "" CACHE PATH "Path to JUCE framework (or use FetchContent)")
 
 # ---------------------------------------------------------------------------
-# DSP library (header-only, but we create an INTERFACE target for convenience)
+# JUCE — fetch automatically if no local path is provided
 # ---------------------------------------------------------------------------
-add_library(geq12_dsp INTERFACE)
-target_include_directories(geq12_dsp INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-
-# ---------------------------------------------------------------------------
-# AAX Plugin target
-# ---------------------------------------------------------------------------
-if(GEQ12_BUILD_AAX)
-    if(NOT EXISTS "${AAX_SDK_PATH}/Interfaces/AAX.h")
-        message(FATAL_ERROR
-            "AAX SDK not found at '${AAX_SDK_PATH}'. "
-            "Set -DAAX_SDK_PATH=<path-to-aax-sdk> or disable with -DGEQ12_BUILD_AAX=OFF")
+if(GEQ12_BUILD_PLUGIN)
+    if(JUCE_PATH AND EXISTS "${JUCE_PATH}/CMakeLists.txt")
+        add_subdirectory("${JUCE_PATH}" juce_build)
+    else()
+        include(FetchContent)
+        FetchContent_Declare(
+            juce
+            GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+            GIT_TAG        7.0.12
+            GIT_SHALLOW    TRUE
+        )
+        FetchContent_MakeAvailable(juce)
     endif()
 
-    # The AAX SDK provides its own CMake support in newer versions.
-    # For older SDK versions, add include/lib paths manually.
-    add_library(geq12_aax MODULE
-        src/aax/GEQ12_Describe.cpp
+    # -------------------------------------------------------------------
+    # VST3 Plugin
+    # -------------------------------------------------------------------
+    juce_add_plugin(GEQ12
+        PRODUCT_NAME           "GEQ-12"
+        COMPANY_NAME           "AudioTools"
+        PLUGIN_MANUFACTURER_CODE Atls
+        PLUGIN_CODE            Gq12
+        FORMATS                VST3            # VST3 only
+        IS_SYNTH               FALSE
+        NEEDS_MIDI_INPUT       FALSE
+        NEEDS_MIDI_OUTPUT      FALSE
+        IS_MIDI_EFFECT         FALSE
+        EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+        COPY_PLUGIN_AFTER_BUILD FALSE
+        VST3_CATEGORIES        "Eq"
     )
-    target_link_libraries(geq12_aax PRIVATE geq12_dsp)
-    target_compile_definitions(geq12_aax PRIVATE HAS_AAX_SDK=1)
-    target_include_directories(geq12_aax PRIVATE "${AAX_SDK_PATH}/Interfaces")
 
-    # On macOS, AAX plugins use .aaxplugin bundle extension
-    if(APPLE)
-        set_target_properties(geq12_aax PROPERTIES
-            BUNDLE TRUE
-            BUNDLE_EXTENSION "aaxplugin"
-            OUTPUT_NAME "GEQ-12"
-        )
-    elseif(WIN32)
-        set_target_properties(geq12_aax PROPERTIES
-            SUFFIX ".aaxplugin"
-            OUTPUT_NAME "GEQ-12"
-        )
-    endif()
+    target_sources(GEQ12
+        PRIVATE
+            Source/PluginProcessor.cpp
+            Source/PluginEditor.cpp
+    )
+
+    target_include_directories(GEQ12
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/Source
+    )
+
+    target_compile_definitions(GEQ12
+        PUBLIC
+            JUCE_WEB_BROWSER=0
+            JUCE_USE_CURL=0
+            JUCE_VST3_CAN_REPLACE_VST2=0
+            JUCE_DISPLAY_SPLASH_SCREEN=0
+    )
+
+    target_link_libraries(GEQ12
+        PRIVATE
+            juce::juce_audio_processors
+            juce::juce_audio_utils
+            juce::juce_gui_basics
+        PUBLIC
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_lto_flags
+            juce::juce_recommended_warning_flags
+    )
 endif()
 
 # ---------------------------------------------------------------------------
-# Tests
+# DSP unit tests — standalone, no JUCE dependency
 # ---------------------------------------------------------------------------
 if(GEQ12_BUILD_TESTS)
+    # Header-only DSP library
+    add_library(geq12_dsp INTERFACE)
+    target_include_directories(geq12_dsp INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/Source)
+
     enable_testing()
     add_executable(geq12_tests
         tests/test_biquad.cpp
         tests/test_graphic_eq.cpp
-        tests/test_plugin_processor.cpp
         tests/test_main.cpp
     )
     target_link_libraries(geq12_tests PRIVATE geq12_dsp)
