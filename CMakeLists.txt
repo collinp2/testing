@@ -36,7 +36,7 @@ if(GEQ12_BUILD_PLUGIN)
         COMPANY_NAME           "AudioTools"
         PLUGIN_MANUFACTURER_CODE Atls
         PLUGIN_CODE            Gq12
-        FORMATS                VST3            # VST3 only
+        FORMATS                VST3 Standalone
         IS_SYNTH               FALSE
         NEEDS_MIDI_INPUT       FALSE
         NEEDS_MIDI_OUTPUT      FALSE
