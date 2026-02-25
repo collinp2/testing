@@ -13,23 +13,20 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JUCE)
 
-set(InfoPlistContent "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
-<plist version=\"1.0\">
-<dict>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>IR Capture needs microphone access to record impulse responses.</string>
-</dict>
-</plist>")
-
-set(PLIST_FILE "${CMAKE_CURRENT_BINARY_DIR}/ExtraInfo.plist")
-file(WRITE "${PLIST_FILE}" "${InfoPlistContent}")
-
 juce_add_gui_app(IRCapture
     PRODUCT_NAME        "IR Capture"
     VERSION             "1.0.0"
     BUNDLE_ID           "com.voidcraftaudio.ircapture"
-    PLIST_TO_MERGE      "${PLIST_FILE}"
+)
+
+# Patch the Info.plist with the microphone usage description after the bundle is built.
+# (JUCE's PLIST_TO_MERGE does not reliably merge entries on all CMake/JUCE versions.)
+add_custom_command(TARGET IRCapture POST_BUILD
+    COMMAND plutil
+        -replace NSMicrophoneUsageDescription
+        -string "IR Capture needs microphone access to record impulse responses."
+        "$<TARGET_BUNDLE_CONTENT_DIR:IRCapture>/Info.plist"
+    COMMENT "Patching Info.plist: NSMicrophoneUsageDescription"
 )
 
 juce_generate_juce_header(IRCapture)
