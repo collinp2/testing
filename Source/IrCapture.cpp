@@ -126,6 +126,7 @@ void IrCapture::startCapture()
     recPos  = 0;
     silenceRemaining = 0;
     resultIR.setSize (0, 0);
+    clipDetected.store (false);
 
     phase.store (CapturePhase::PlayingSweep);
 }
@@ -143,9 +144,20 @@ void IrCapture::processBlock (const float* inputBuffer, float* outputBuffer, int
         inPeak = std::max (inPeak, std::abs (inputBuffer[i]));
 
     if (currentPhase == CapturePhase::Idle || currentPhase == CapturePhase::Processing
-        || currentPhase == CapturePhase::Done)
+        || currentPhase == CapturePhase::Done || currentPhase == CapturePhase::Clipped)
     {
         std::fill (outputBuffer, outputBuffer + numSamples, 0.0f);
+        inputLevel.store (inPeak);
+        outputLevel.store (0.0f);
+        return;
+    }
+
+    // Abort capture if any input sample clips
+    if (inPeak >= 1.0f)
+    {
+        std::fill (outputBuffer, outputBuffer + numSamples, 0.0f);
+        clipDetected.store (true);
+        phase.store (CapturePhase::Clipped);
         inputLevel.store (inPeak);
         outputLevel.store (0.0f);
         return;
@@ -378,17 +390,6 @@ juce::AudioBuffer<float> IrCapture::averageAndFinalize (
         averaged = std::move (trimmed);
     }
 
-    // Peak normalize to 0.99
-    float peak = 0.0f;
-    for (int i = 0; i < averaged.getNumSamples(); ++i)
-        peak = std::max (peak, std::abs (averaged.getSample (0, i)));
-
-    if (peak > 0.0f)
-    {
-        const float gain = 0.99f / peak;
-        averaged.applyGain (gain);
-    }
-
     return averaged;
 }
 
@@ -401,24 +402,16 @@ juce::AudioBuffer<float> IrCapture::retrieveIR()
     return ir;
 }
 
+void IrCapture::resetToIdle()
+{
+    clipDetected.store (false);
+    phase.store (CapturePhase::Idle);
+}
+
 //==============================================================================
 juce::String IrCapture::saveToFile (const juce::AudioBuffer<float>& ir,
-                                     const juce::String& baseName,
-                                     int captureIndex)
+                                     const juce::File& outputFile)
 {
-    juce::File outputDir (juce::File::getSpecialLocation (juce::File::userMusicDirectory)
-                            .getChildFile ("IR Captures"));
-
-    if (! outputDir.isDirectory())
-    {
-        const auto result = outputDir.createDirectory();
-        if (result.failed())
-            return "Failed to create output directory: " + result.getErrorMessage();
-    }
-
-    const juce::String filename = baseName + "_" + juce::String (captureIndex).paddedLeft ('0', 3) + ".wav";
-    juce::File outputFile = outputDir.getChildFile (filename);
-
     juce::WavAudioFormat wavFormat;
     auto stream = std::unique_ptr<juce::FileOutputStream> (outputFile.createOutputStream());
     if (stream == nullptr)

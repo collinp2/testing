@@ -1,7 +1,7 @@
 #include "MainComponent.h"
 
 static constexpr int kWindowWidth  = 480;
-static constexpr int kWindowHeight = 420;
+static constexpr int kWindowHeight = 440;
 static constexpr int kHeaderHeight = 40;
 static constexpr int kMeterWidth   = 40;
 
@@ -21,6 +21,21 @@ MainComponent::MainComponent (juce::AudioDeviceManager& dm)
     audioSetupButton.onClick = [this] { openAudioSetup(); };
     addAndMakeVisible (audioSetupButton);
 
+    // Gain row
+    gainLabel.setText ("Gain (dB):", juce::dontSendNotification);
+    gainLabel.setJustificationType (juce::Justification::centredRight);
+    addAndMakeVisible (gainLabel);
+
+    gainSlider.setRange (-18.0, 18.0, 0.1);
+    gainSlider.setValue (0.0);
+    gainSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+    gainSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 52, 20);
+    addAndMakeVisible (gainSlider);
+
+    // Normalize row
+    normalizeButton.setToggleState (true, juce::dontSendNotification);
+    addAndMakeVisible (normalizeButton);
+
     // Base name row
     baseNameLabel.setText ("Base Name:", juce::dontSendNotification);
     baseNameLabel.setJustificationType (juce::Justification::centredRight);
@@ -28,7 +43,26 @@ MainComponent::MainComponent (juce::AudioDeviceManager& dm)
 
     baseNameEditor.setText ("IR");
     baseNameEditor.setInputRestrictions (64, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-");
+    baseNameEditor.onTextChange = [this]
+    {
+        // Reset counter whenever the name changes
+        captureIndex = 1;
+        lastBaseName = baseNameEditor.getText().trim();
+    };
     addAndMakeVisible (baseNameEditor);
+
+    // Save directory row
+    outputDir = juce::File::getSpecialLocation (juce::File::userMusicDirectory)
+                    .getChildFile ("IR Captures");
+    lastBaseName = "IR";
+
+    chooseDirButton.onClick = [this] { chooseSaveDir(); };
+    addAndMakeVisible (chooseDirButton);
+
+    dirLabel.setText (outputDir.getFullPathName(), juce::dontSendNotification);
+    dirLabel.setJustificationType (juce::Justification::centredLeft);
+    dirLabel.setMinimumHorizontalScale (0.5f);
+    addAndMakeVisible (dirLabel);
 
     // Capture button
     captureButton.onClick = [this] { startCapture(); };
@@ -70,24 +104,33 @@ void MainComponent::resized()
     audioSetupButton.setBounds (w - 110, (kHeaderHeight - 24) / 2, 100, 24);
 
     // Left / right meter columns
-    inMeter.setBounds  (0,              kHeaderHeight, kMeterWidth, h - kHeaderHeight);
+    inMeter.setBounds  (0,               kHeaderHeight, kMeterWidth, h - kHeaderHeight);
     outMeter.setBounds (w - kMeterWidth, kHeaderHeight, kMeterWidth, h - kHeaderHeight);
 
     // Center area
-    const int cx      = kMeterWidth;
-    const int cw      = w - kMeterWidth * 2;
-    const int centerY = kHeaderHeight + (h - kHeaderHeight) / 2;
+    const int cx     = kMeterWidth + 8;
+    const int cw     = w - kMeterWidth * 2 - 16;
+    const int rowH   = 24;
+    const int labelW = 80;
+
+    // Gain row
+    gainLabel.setBounds  (cx,                 58, labelW, rowH);
+    gainSlider.setBounds (cx + labelW + 4,    58, cw - labelW - 4, rowH);
+
+    // Normalize row
+    normalizeButton.setBounds (cx + labelW + 4, 94, cw - labelW - 4, rowH);
 
     // Base name row
-    const int rowH  = 24;
-    const int labelW = 80;
-    const int editorW = cw - labelW - 16;
-    baseNameLabel.setBounds (cx + 8,              centerY - 50, labelW, rowH);
-    baseNameEditor.setBounds (cx + 8 + labelW + 4, centerY - 50, editorW, rowH);
+    baseNameLabel.setBounds  (cx,                130, labelW, rowH);
+    baseNameEditor.setBounds (cx + labelW + 4,   130, cw - labelW - 4, rowH);
 
-    // Capture button + status on same row
-    captureButton.setBounds (cx + 8,              centerY, 90, 30);
-    statusLabel.setBounds   (cx + 8 + 90 + 12,   centerY, cw - 90 - 20, 30);
+    // Save directory row
+    chooseDirButton.setBounds (cx,               166, 90, rowH);
+    dirLabel.setBounds         (cx + 90 + 6,     166, cw - 90 - 6, rowH);
+
+    // Capture button + status
+    captureButton.setBounds (cx,           220, 90, 30);
+    statusLabel.setBounds   (cx + 90 + 12, 220, cw - 90 - 12, 30);
 }
 
 void MainComponent::paint (juce::Graphics& g)
@@ -166,21 +209,29 @@ void MainComponent::timerCallback()
     inMeter.timerTick();
     outMeter.timerTick();
 
-    // Poll for completion
-    if (irCapture.getPhase() == CapturePhase::Processing)
+    // Poll for completion / errors
+    const auto phase = irCapture.getPhase();
+    if (phase == CapturePhase::Processing)
     {
         setStatus ("Processing...");
     }
-    else if (irCapture.getPhase() == CapturePhase::Done)
+    else if (phase == CapturePhase::Done)
     {
         onCaptureComplete();
+    }
+    else if (phase == CapturePhase::Clipped)
+    {
+        setStatus ("! CLIPPING DETECTED — capture aborted");
+        irCapture.resetToIdle();
+        captureButton.setEnabled (true);
     }
 }
 
 //==============================================================================
 void MainComponent::startCapture()
 {
-    if (irCapture.getPhase() != CapturePhase::Idle)
+    const auto p = irCapture.getPhase();
+    if (p != CapturePhase::Idle && p != CapturePhase::Clipped)
         return;
 
     captureButton.setEnabled (false);
@@ -190,18 +241,59 @@ void MainComponent::startCapture()
 
 void MainComponent::onCaptureComplete()
 {
-    auto ir = irCapture.retrieveIR();
+    auto ir = irCapture.retrieveIR(); // also resets phase to Idle
 
     const juce::String baseName = baseNameEditor.getText().trim().isEmpty()
                                     ? "IR"
                                     : baseNameEditor.getText().trim();
 
-    const juce::String err = irCapture.saveToFile (ir, baseName, captureIndex);
+    // Apply output gain from slider
+    const float gainLinear = juce::Decibels::decibelsToGain ((float) gainSlider.getValue());
+    if (gainLinear != 1.0f)
+        ir.applyGain (gainLinear);
+
+    // Normalize to 0.99 if requested
+    if (normalizeButton.getToggleState())
+    {
+        float peak = 0.0f;
+        for (int i = 0; i < ir.getNumSamples(); ++i)
+            peak = std::max (peak, std::abs (ir.getSample (0, i)));
+        if (peak > 0.0f)
+            ir.applyGain (0.99f / peak);
+    }
+
+    // Ensure output directory exists
+    if (! outputDir.isDirectory())
+    {
+        const auto result = outputDir.createDirectory();
+        if (result.failed())
+        {
+            setStatus ("Error: could not create directory");
+            captureButton.setEnabled (true);
+            return;
+        }
+    }
+
+    // Find the first available filename starting from captureIndex
+    int usedIndex = captureIndex;
+    juce::File outputFile;
+    for (;;)
+    {
+        const juce::String filename = baseName + "_"
+                                      + juce::String (usedIndex).paddedLeft ('0', 3)
+                                      + ".wav";
+        outputFile = outputDir.getChildFile (filename);
+        if (! outputFile.existsAsFile())
+            break;
+        ++usedIndex;
+    }
+
+    const juce::String err = irCapture.saveToFile (ir, outputFile);
 
     if (err.isEmpty())
     {
-        setStatus ("Saved: " + baseName + "_" + juce::String (captureIndex).paddedLeft ('0', 3) + ".wav");
-        ++captureIndex;
+        setStatus ("Saved: " + outputFile.getFileName());
+        captureIndex = usedIndex + 1;
     }
     else
     {
@@ -214,6 +306,24 @@ void MainComponent::onCaptureComplete()
 void MainComponent::setStatus (const juce::String& text)
 {
     statusLabel.setText (text, juce::dontSendNotification);
+}
+
+void MainComponent::chooseSaveDir()
+{
+    dirChooser = std::make_unique<juce::FileChooser> ("Select output directory", outputDir);
+
+    dirChooser->launchAsync (juce::FileBrowserComponent::openMode |
+                             juce::FileBrowserComponent::canSelectDirectories,
+                             [this] (const juce::FileChooser& fc)
+                             {
+                                 const auto results = fc.getResults();
+                                 if (! results.isEmpty())
+                                 {
+                                     outputDir = results[0];
+                                     dirLabel.setText (outputDir.getFullPathName(),
+                                                       juce::dontSendNotification);
+                                 }
+                             });
 }
 
 void MainComponent::openAudioSetup()

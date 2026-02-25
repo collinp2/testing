@@ -33,6 +33,7 @@ private:
     void startCapture();
     void onCaptureComplete();
     void openAudioSetup();
+    void chooseSaveDir();
     void setStatus (const juce::String& text);
 
     juce::AudioDeviceManager& deviceManager;
@@ -40,8 +41,18 @@ private:
     // UI
     juce::TextButton audioSetupButton { "Audio Setup" };
     juce::Label      titleLabel;
+
+    juce::Label      gainLabel;
+    juce::Slider     gainSlider;
+
+    juce::ToggleButton normalizeButton { "Normalize output" };
+
     juce::Label      baseNameLabel;
     juce::TextEditor baseNameEditor;
+
+    juce::TextButton chooseDirButton { "Save To..." };
+    juce::Label      dirLabel;
+
     juce::TextButton captureButton { "Capture" };
     juce::Label      statusLabel;
 
@@ -49,8 +60,12 @@ private:
     LevelMeter outMeter;
 
     // State
-    IrCapture irCapture;
-    int       captureIndex { 1 };
+    IrCapture    irCapture;
+    int          captureIndex { 1 };
+    juce::String lastBaseName;
+    juce::File   outputDir;
+
+    std::unique_ptr<juce::FileChooser> dirChooser;
 
     // Scratch block for audio thread (avoid heap alloc in callback)
     juce::AudioBuffer<float> ioBuffer;

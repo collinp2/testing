@@ -10,7 +10,8 @@ enum class CapturePhase
     PlayingSweep,
     PlayingNoise,
     Processing,
-    Done
+    Done,
+    Clipped
 };
 
 class IrCapture
@@ -35,14 +36,19 @@ public:
 
     CapturePhase getPhase() const { return phase.load(); }
 
+    /** Call from message thread to return to Idle after a clip abort. */
+    void resetToIdle();
+
+    /** True if the last capture was aborted due to input clipping. */
+    bool wasClipped() const { return clipDetected.load(); }
+
     /** Call from message thread after isComplete(). Returns a mono IR buffer.
         Resets state back to Idle. */
     juce::AudioBuffer<float> retrieveIR();
 
-    /** Save the IR to file. Returns empty string on success or error message. */
+    /** Save the IR to the given file path. Returns empty string on success or error message. */
     juce::String saveToFile (const juce::AudioBuffer<float>& ir,
-                             const juce::String& baseName,
-                             int captureIndex);
+                             const juce::File& outputFile);
 
     /** Input level for metering (0..1 linear), updated each processBlock. */
     float getInputLevel() const  { return inputLevel.load(); }
@@ -94,6 +100,7 @@ private:
     juce::ThreadPool threadPool { 1 };
     juce::AudioBuffer<float> resultIR;
 
-    std::atomic<float> inputLevel  { 0.0f };
-    std::atomic<float> outputLevel { 0.0f };
+    std::atomic<float> inputLevel   { 0.0f };
+    std::atomic<float> outputLevel  { 0.0f };
+    std::atomic<bool>  clipDetected { false };
 };
