@@ -35,7 +35,7 @@ void IrCapture::generateSweep()
     for (int i = 0; i < N; ++i)
     {
         const double t = static_cast<double> (i) / sampleRate;
-        sweepSignal[i] = static_cast<float> (
+        sweepSignal[i] = 0.9f * static_cast<float> (
             std::sin (w1 * L * (std::exp (t / L) - 1.0)));
     }
 
@@ -152,19 +152,9 @@ void IrCapture::processBlock (const float* inputBuffer, float* outputBuffer, int
         return;
     }
 
-    // Abort capture if any input sample clips
-    if (inPeak >= 1.0f)
-    {
-        std::fill (outputBuffer, outputBuffer + numSamples, 0.0f);
-        clipDetected.store (true);
-        phase.store (CapturePhase::Clipped);
-        inputLevel.store (inPeak);
-        outputLevel.store (0.0f);
-        return;
-    }
-
     const int sweepLen  = static_cast<int> (sweepSignal.size());
     const int noiseLen  = static_cast<int> (noiseSignal.size());
+    const float gain    = playbackGain.load();
 
     for (int i = 0; i < numSamples; ++i)
     {
@@ -174,7 +164,7 @@ void IrCapture::processBlock (const float* inputBuffer, float* outputBuffer, int
         {
             if (playPos < sweepLen)
             {
-                outSample = sweepSignal[playPos++];
+                outSample = sweepSignal[playPos++] * gain;
             }
             else
             {
@@ -201,7 +191,7 @@ void IrCapture::processBlock (const float* inputBuffer, float* outputBuffer, int
         {
             if (playPos < noiseLen)
             {
-                outSample = noiseSignal[playPos++];
+                outSample = noiseSignal[playPos++] * gain;
             }
             else
             {
@@ -225,6 +215,17 @@ void IrCapture::processBlock (const float* inputBuffer, float* outputBuffer, int
 
         outputBuffer[i] = outSample;
         outPeak = std::max (outPeak, std::abs (outSample));
+    }
+
+    // Abort if input or output clipped
+    if (inPeak >= 1.0f || outPeak >= 1.0f)
+    {
+        std::fill (outputBuffer, outputBuffer + numSamples, 0.0f);
+        clipDetected.store (true);
+        phase.store (CapturePhase::Clipped);
+        inputLevel.store (inPeak);
+        outputLevel.store (outPeak);
+        return;
     }
 
     inputLevel.store (inPeak);

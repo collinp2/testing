@@ -42,6 +42,9 @@ public:
     /** True if the last capture was aborted due to input clipping. */
     bool wasClipped() const { return clipDetected.load(); }
 
+    /** Set the playback gain for the test signal (linear, audio-thread safe). */
+    void setPlaybackGain (float gain) { playbackGain.store (gain); }
+
     /** Call from message thread after isComplete(). Returns a mono IR buffer.
         Resets state back to Idle. */
     juce::AudioBuffer<float> retrieveIR();
@@ -100,7 +103,8 @@ private:
     juce::ThreadPool threadPool { 1 };
     juce::AudioBuffer<float> resultIR;
 
-    std::atomic<float> inputLevel   { 0.0f };
+    std::atomic<float> inputLevel    { 0.0f };
     std::atomic<float> outputLevel  { 0.0f };
     std::atomic<bool>  clipDetected { false };
+    std::atomic<float> playbackGain { 1.0f };
 };

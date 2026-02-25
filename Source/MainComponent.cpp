@@ -30,6 +30,10 @@ MainComponent::MainComponent (juce::AudioDeviceManager& dm)
     gainSlider.setValue (0.0);
     gainSlider.setSliderStyle (juce::Slider::LinearHorizontal);
     gainSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 52, 20);
+    gainSlider.onValueChange = [this]
+    {
+        irCapture.setPlaybackGain (juce::Decibels::decibelsToGain ((float) gainSlider.getValue()));
+    };
     addAndMakeVisible (gainSlider);
 
     // Normalize row
@@ -151,8 +155,8 @@ void MainComponent::paint (juce::Graphics& g)
     // IN / OUT labels
     g.setColour (juce::Colours::lightgrey);
     g.setFont (10.0f);
-    g.drawText ("IN",  0, kHeaderHeight + 4, kMeterWidth, 16, juce::Justification::centred);
-    g.drawText ("OUT", getWidth() - kMeterWidth, kHeaderHeight + 4, kMeterWidth, 16, juce::Justification::centred);
+    g.drawText ("OUT", 0, kHeaderHeight + 4, kMeterWidth, 16, juce::Justification::centred);
+    g.drawText ("IN",  getWidth() - kMeterWidth, kHeaderHeight + 4, kMeterWidth, 16, juce::Justification::centred);
 }
 
 //==============================================================================
@@ -204,8 +208,8 @@ void MainComponent::audioDeviceIOCallbackWithContext (
 //==============================================================================
 void MainComponent::timerCallback()
 {
-    inMeter.setLevel  (irCapture.getInputLevel());
-    outMeter.setLevel (irCapture.getOutputLevel());
+    inMeter.setLevel  (irCapture.getOutputLevel());  // left meter = output
+    outMeter.setLevel (irCapture.getInputLevel());   // right meter = input
     inMeter.timerTick();
     outMeter.timerTick();
 
@@ -246,11 +250,6 @@ void MainComponent::onCaptureComplete()
     const juce::String baseName = baseNameEditor.getText().trim().isEmpty()
                                     ? "IR"
                                     : baseNameEditor.getText().trim();
-
-    // Apply output gain from slider
-    const float gainLinear = juce::Decibels::decibelsToGain ((float) gainSlider.getValue());
-    if (gainLinear != 1.0f)
-        ir.applyGain (gainLinear);
 
     // Normalize to 0.99 if requested
     if (normalizeButton.getToggleState())
