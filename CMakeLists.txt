@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(GEQ12 VERSION 1.0.0 LANGUAGES CXX)
+project(GEQ12 VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,8 +22,8 @@ if(GEQ12_BUILD_PLUGIN)
         FetchContent_Declare(
             juce
             GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-            GIT_TAG        7.0.12
-            GIT_SHALLOW    TRUE
+            GIT_TAG        develop
+            GIT_SHALLOW    FALSE
         )
         FetchContent_MakeAvailable(juce)
     endif()
