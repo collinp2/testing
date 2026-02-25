@@ -7,10 +7,11 @@
 //==============================================================================
 // FleshRenderEditor — the main plugin window.
 //
-// Layout (600 × 530):
-//   Header (0…90):   title "FLESH RENDER", subtitle, blood drips
-//   Panels (90…480): three BandPanel components side by side
-//   Footer (480…530): branding bar
+// Layout (600 × 620):
+//   Header  (0…90):    title "FLESH RENDER", subtitle, blood drips
+//   Panels  (90…480):  three BandPanel components side by side
+//   Output  (480…580): master output level knob (Neve 1073 style)
+//   Footer  (580…620): branding bar
 //==============================================================================
 class FleshRenderEditor : public juce::AudioProcessorEditor
 {
@@ -25,8 +26,15 @@ private:
     FleshRenderProcessor& processor;
 
     HorrorLookAndFeel laf;
+    NeveLookAndFeel   neveLaf;
 
     BandPanel lowPanel, midPanel, highPanel;
+
+    // Master output level knob (Neve 1073 style)
+    juce::Slider outputKnob;
+    juce::Label  outputLabel;
+    using Attachment = juce::AudioProcessorValueTreeState::SliderAttachment;
+    std::unique_ptr<Attachment> outputAttach;
 
     // Background texture image — pre-rendered once for performance
     juce::Image backgroundTexture;

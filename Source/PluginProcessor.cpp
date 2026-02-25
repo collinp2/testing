@@ -34,6 +34,16 @@ FleshRenderProcessor::createParameterLayout()
     addParam ("high_dist", "High Distortion");
     addParam ("high_fuzz", "High Fuzz");
 
+    // Master output level (-60 dB … +12 dB, default 0 dB)
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "output_level", 1 },
+        "Output Level",
+        juce::NormalisableRange<float> (-60.0f, 12.0f, 0.1f, 1.0f),
+        0.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction ([] (float v, int) { return juce::String (v, 1) + " dB"; })
+            .withValueFromStringFunction ([] (const juce::String& s) { return s.getFloatValue(); })));
+
     return layout;
 }
 
@@ -44,6 +54,7 @@ FleshRenderProcessor::FleshRenderProcessor()
                         .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "Parameters", createParameterLayout())
 {
+    outputLevelParam = apvts.getRawParameterValue ("output_level");
 }
 
 FleshRenderProcessor::~FleshRenderProcessor() {}
@@ -97,6 +108,11 @@ void FleshRenderProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     lowBuf.setSize  (numCh, samplesPerBlock);
     midBuf.setSize  (numCh, samplesPerBlock);
     highBuf.setSize (numCh, samplesPerBlock);
+
+    // Initialise output gain smoother (50 ms ramp)
+    outputGainSmoothed.reset (sampleRate, 0.05);
+    outputGainSmoothed.setCurrentAndTargetValue (
+        juce::Decibels::decibelsToGain (outputLevelParam->load(), -60.0f));
 }
 
 void FleshRenderProcessor::releaseResources()
@@ -193,6 +209,24 @@ void FleshRenderProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         buffer.addFrom (ch, 0, lowBuf,  ch, 0, numSamples);
         buffer.addFrom (ch, 0, midBuf,  ch, 0, numSamples);
         buffer.addFrom (ch, 0, highBuf, ch, 0, numSamples);
+    }
+
+    // ---- Apply master output gain (smoothed to avoid clicks) ---------------
+    const float targetGain = juce::Decibels::decibelsToGain (outputLevelParam->load(), -60.0f);
+    outputGainSmoothed.setTargetValue (targetGain);
+
+    if (outputGainSmoothed.isSmoothing())
+    {
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float g = outputGainSmoothed.getNextValue();
+            for (int ch = 0; ch < numChannels; ++ch)
+                buffer.getWritePointer (ch)[i] *= g;
+        }
+    }
+    else
+    {
+        buffer.applyGain (outputGainSmoothed.getCurrentValue());
     }
 }
 

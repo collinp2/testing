@@ -80,6 +80,9 @@ private:
 
     double currentSampleRate = 44100.0;
 
+    std::atomic<float>* outputLevelParam = nullptr;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> outputGainSmoothed;
+
     //==========================================================================
     // Waveshaping functions
     //==========================================================================

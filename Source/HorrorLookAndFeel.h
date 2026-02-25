@@ -59,3 +59,24 @@ public:
     static constexpr juce::uint32 COL_KNOB_SHADOW  = 0xFF090909;
     static constexpr juce::uint32 COL_RUST         = 0xFF3D2020;
 };
+
+//==============================================================================
+// Neve 1073-style LookAndFeel: chunky matte-black knobs with white marker line,
+// knurled outer ring, scale dots — classic British console aesthetic.
+//==============================================================================
+class NeveLookAndFeel : public juce::LookAndFeel_V4
+{
+public:
+    NeveLookAndFeel();
+    ~NeveLookAndFeel() override = default;
+
+    void drawRotarySlider (juce::Graphics& g,
+                           int x, int y, int width, int height,
+                           float sliderPosProportional,
+                           float rotaryStartAngle,
+                           float rotaryEndAngle,
+                           juce::Slider& slider) override;
+
+    void drawLabel  (juce::Graphics& g, juce::Label& label) override;
+    juce::Font getLabelFont (juce::Label& label) override;
+};

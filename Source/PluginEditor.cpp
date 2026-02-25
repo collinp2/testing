@@ -1,11 +1,12 @@
 #include "PluginEditor.h"
 
 //==============================================================================
-static constexpr int EDITOR_W      = 600;
-static constexpr int EDITOR_H      = 530;
-static constexpr int HEADER_H      = 90;
-static constexpr int FOOTER_H      = 40;
-static constexpr int PANEL_MARGIN  = 12;
+static constexpr int EDITOR_W        = 600;
+static constexpr int EDITOR_H        = 620;
+static constexpr int HEADER_H        = 90;
+static constexpr int FOOTER_H        = 40;
+static constexpr int OUTPUT_SECTION_H = 90;
+static constexpr int PANEL_MARGIN    = 12;
 
 //==============================================================================
 FleshRenderEditor::FleshRenderEditor (FleshRenderProcessor& p)
@@ -25,12 +26,29 @@ FleshRenderEditor::FleshRenderEditor (FleshRenderProcessor& p)
     addAndMakeVisible (midPanel);
     addAndMakeVisible (highPanel);
 
+    // Master output knob — Neve 1073 style
+    outputKnob.setSliderStyle (juce::Slider::RotaryVerticalDrag);
+    outputKnob.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 64, 16);
+    outputKnob.setRotaryParameters (juce::MathConstants<float>::pi * 1.2f,
+                                     juce::MathConstants<float>::pi * 2.8f, true);
+    outputKnob.setLookAndFeel (&neveLaf);
+    addAndMakeVisible (outputKnob);
+
+    outputLabel.setText ("Output", juce::dontSendNotification);
+    outputLabel.setJustificationType (juce::Justification::centred);
+    outputLabel.setLookAndFeel (&neveLaf);
+    addAndMakeVisible (outputLabel);
+
+    outputAttach = std::make_unique<Attachment> (p.apvts, "output_level", outputKnob);
+
     setSize (EDITOR_W, EDITOR_H);
     buildBackgroundTexture (EDITOR_W, EDITOR_H);
 }
 
 FleshRenderEditor::~FleshRenderEditor()
 {
+    outputKnob.setLookAndFeel (nullptr);
+    outputLabel.setLookAndFeel (nullptr);
     setLookAndFeel (nullptr);
 }
 
@@ -71,10 +89,11 @@ void FleshRenderEditor::buildBackgroundTexture (int w, int h)
     bg.setColour (juce::Colour (HorrorLookAndFeel::COL_HEADER_BG));
     bg.fillRect (0, h - FOOTER_H, w, FOOTER_H);
 
-    // Header / footer separator lines
+    // Header / footer / output section separator lines
     bg.setColour (juce::Colour (HorrorLookAndFeel::COL_BLOOD_DARK));
-    bg.drawHorizontalLine (HEADER_H,      2.0f, float (w - 2));
-    bg.drawHorizontalLine (h - FOOTER_H,  2.0f, float (w - 2));
+    bg.drawHorizontalLine (HEADER_H,                          2.0f, float (w - 2));
+    bg.drawHorizontalLine (h - FOOTER_H,                      2.0f, float (w - 2));
+    bg.drawHorizontalLine (h - FOOTER_H - OUTPUT_SECTION_H,  2.0f, float (w - 2));
 
     // Bright border on the header top separator
     bg.setColour (juce::Colour (HorrorLookAndFeel::COL_BLOOD).withAlpha (0.5f));
@@ -136,12 +155,13 @@ void FleshRenderEditor::paint (juce::Graphics& g)
 //==============================================================================
 void FleshRenderEditor::resized()
 {
+    const int outputSectionY  = getHeight() - FOOTER_H - OUTPUT_SECTION_H;
     const int panelAreaTop    = HEADER_H + 6;
-    const int panelAreaBottom = getHeight() - FOOTER_H - 6;
+    const int panelAreaBottom = outputSectionY - 6;
     const int panelH          = panelAreaBottom - panelAreaTop;
 
     // Three equal-width panels with margins
-    const int totalMargins = PANEL_MARGIN * 4; // left + 2 gaps + right
+    const int totalMargins = PANEL_MARGIN * 4;
     const int panelW       = (getWidth() - totalMargins) / 3;
 
     const int p1x = PANEL_MARGIN;
@@ -151,4 +171,11 @@ void FleshRenderEditor::resized()
     lowPanel .setBounds (p1x, panelAreaTop, panelW, panelH);
     midPanel .setBounds (p2x, panelAreaTop, panelW, panelH);
     highPanel.setBounds (p3x, panelAreaTop, panelW, panelH);
+
+    // Output knob — centred in the output section
+    const int knobSize = 56;
+    const int knobX    = (getWidth() - knobSize) / 2;
+    const int knobY    = outputSectionY + 6;
+    outputKnob .setBounds (knobX, knobY, knobSize, knobSize);
+    outputLabel.setBounds (0, knobY + knobSize + 2, getWidth(), 14);
 }

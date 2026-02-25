@@ -210,6 +210,129 @@ void HorrorLookAndFeel::drawGrainTexture (juce::Graphics& g,
 }
 
 //==============================================================================
+//==============================================================================
+// NeveLookAndFeel
+//==============================================================================
+NeveLookAndFeel::NeveLookAndFeel()
+{
+    setColour (juce::Slider::textBoxTextColourId,       juce::Colour (0xFFE8DFC8));
+    setColour (juce::Slider::textBoxOutlineColourId,    juce::Colour (0xFF222222));
+    setColour (juce::Slider::textBoxBackgroundColourId, juce::Colour (0xFF111111));
+    setColour (juce::Label::textColourId,               juce::Colour (0xFFE8DFC8));
+    setColour (juce::Label::backgroundColourId,         juce::Colours::transparentBlack);
+    setColour (juce::Label::outlineColourId,            juce::Colours::transparentBlack);
+}
+
+void NeveLookAndFeel::drawRotarySlider (juce::Graphics& g,
+                                        int x, int y, int width, int height,
+                                        float sliderPos,
+                                        float startAngle, float endAngle,
+                                        juce::Slider& /*slider*/)
+{
+    const float cx     = x + width  * 0.5f;
+    const float cy     = y + height * 0.5f;
+    const float rKnob  = juce::jmin (width, height) * 0.5f - 5.0f;
+    const float rRing  = rKnob + 4.0f;
+
+    // ---- Drop shadow --------------------------------------------------------
+    g.setColour (juce::Colours::black.withAlpha (0.55f));
+    g.fillEllipse (cx - rKnob - 1 + 3, cy - rKnob - 1 + 4, (rKnob + 1) * 2, (rKnob + 1) * 2);
+
+    // ---- Knob body (matte black with radial gradient) -----------------------
+    {
+        juce::ColourGradient body (juce::Colour (0xFF2A2A2A), cx - rKnob * 0.5f, cy - rKnob * 0.5f,
+                                    juce::Colour (0xFF0D0D0D), cx + rKnob * 0.5f, cy + rKnob * 0.5f, false);
+        g.setGradientFill (body);
+        g.fillEllipse (cx - rKnob, cy - rKnob, rKnob * 2, rKnob * 2);
+    }
+
+    // ---- Bevel highlight arc (top-left, imitates raised shoulder rim) -------
+    {
+        juce::Path bevel;
+        bevel.addArc (cx - rKnob + 1.5f, cy - rKnob + 1.5f,
+                      (rKnob - 1.5f) * 2, (rKnob - 1.5f) * 2,
+                      juce::MathConstants<float>::pi * 1.1f,
+                      juce::MathConstants<float>::pi * 1.9f, true);
+        g.setColour (juce::Colour (0xFF444444));
+        g.strokePath (bevel, juce::PathStrokeType (1.2f));
+    }
+
+    // ---- Knurling ring: 24 radial tick marks --------------------------------
+    {
+        const int numTicks = 24;
+        for (int i = 0; i < numTicks; ++i)
+        {
+            const float angle  = (juce::MathConstants<float>::twoPi / numTicks) * i;
+            const float cosA   = std::cos (angle);
+            const float sinA   = std::sin (angle);
+            const bool  major  = (i % 3 == 0);
+            g.setColour (major ? juce::Colour (0xFF4A4A4A) : juce::Colour (0xFF383838));
+            g.drawLine (cx + (rKnob + 1.0f) * cosA, cy + (rKnob + 1.0f) * sinA,
+                        cx + (rKnob + 4.0f) * cosA, cy + (rKnob + 4.0f) * sinA,
+                        major ? 1.5f : 1.0f);
+        }
+    }
+
+    // ---- Outer ring border --------------------------------------------------
+    g.setColour (juce::Colour (0xFF333333));
+    g.drawEllipse (cx - rRing, cy - rRing, rRing * 2, rRing * 2, 0.8f);
+
+    // ---- Scale dots (13 positions around outer ring) ------------------------
+    {
+        const int   numDots      = 13;
+        const float dotRadius    = 1.8f;
+        const float dotRingR     = rRing + 6.0f;
+        const float currentAngle = startAngle + (endAngle - startAngle) * sliderPos;
+
+        for (int i = 0; i < numDots; ++i)
+        {
+            const float angle = startAngle + (endAngle - startAngle) * float (i) / float (numDots - 1);
+            const float dx    = cx + dotRingR * std::cos (angle);
+            const float dy    = cy + dotRingR * std::sin (angle);
+            const bool  lit   = (std::abs (angle - currentAngle) < (endAngle - startAngle) / float (numDots - 1) * 0.6f);
+            g.setColour (lit ? juce::Colour (0xFFE8DFC8) : juce::Colour (0xFF8A8070));
+            g.fillEllipse (dx - dotRadius, dy - dotRadius, dotRadius * 2, dotRadius * 2);
+        }
+    }
+
+    // ---- White marker line --------------------------------------------------
+    {
+        const float indicatorAngle = startAngle + (endAngle - startAngle) * sliderPos;
+        const float cosA = std::cos (indicatorAngle);
+        const float sinA = std::sin (indicatorAngle);
+        juce::Path marker;
+        marker.startNewSubPath (cx + rKnob * 0.18f * cosA, cy + rKnob * 0.18f * sinA);
+        marker.lineTo          (cx + rKnob * 0.82f * cosA, cy + rKnob * 0.82f * sinA);
+        g.setColour (juce::Colours::white);
+        g.strokePath (marker, juce::PathStrokeType (3.0f,
+                                                     juce::PathStrokeType::mitered,
+                                                     juce::PathStrokeType::rounded));
+    }
+
+    // ---- Dark seam ring (between knob body and knurling) --------------------
+    g.setColour (juce::Colour (0xFF1A1A1A));
+    g.drawEllipse (cx - rKnob, cy - rKnob, rKnob * 2, rKnob * 2, 1.5f);
+}
+
+juce::Font NeveLookAndFeel::getLabelFont (juce::Label& /*label*/)
+{
+    return juce::Font (juce::Font::getDefaultSansSerifFontName(), 10.0f, juce::Font::bold);
+}
+
+void NeveLookAndFeel::drawLabel (juce::Graphics& g, juce::Label& label)
+{
+    if (! label.isBeingEdited())
+    {
+        g.setColour (label.findColour (juce::Label::textColourId));
+        g.setFont (getLabelFont (label));
+        g.drawFittedText (label.getText().toUpperCase(),
+                          label.getLocalBounds(),
+                          label.getJustificationType(),
+                          1, 1.0f);
+    }
+}
+
+//==============================================================================
 void HorrorLookAndFeel::drawPanelBackground (juce::Graphics& g,
                                               juce::Rectangle<int> bounds)
 {
