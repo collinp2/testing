@@ -2,6 +2,13 @@
 
 A standalone macOS application for capturing impulse responses (IRs) from hardware devices such as guitar cabinets, reverb units, or any linear audio system.
 
+> [!IMPORTANT]
+> This app is unsigned. After installing on any Mac, run this command in Terminal before opening it:
+> ```bash
+> xattr -cr "/Applications/IR Capture.app"
+> ```
+> Without this step macOS will block the app with a "damaged" error. Alternatively, right-click the app in Finder and choose **Open**.
+
 ## How It Works
 
 IR Capture uses a dual-stimulus measurement technique for accuracy:
@@ -60,8 +67,6 @@ cmake --build build --config Release
 ```
 
 The built app will be at `build/IRCapture_artefacts/Release/IR Capture.app`.
-
-> **Note:** The app is unsigned. On other Macs, run `xattr -cr "/Applications/IR Capture.app"` after installing to bypass Gatekeeper, or right-click → Open.
 
 ## Technical Details
 
