@@ -2,6 +2,8 @@
 
 A standalone macOS application for capturing impulse responses (IRs) from hardware devices such as guitar cabinets, reverb units, or any linear audio system.
 
+**[Download IR Capture v1.0.0](https://github.com/collinp2/cp_software/releases/tag/v1.0.0)**
+
 > [!IMPORTANT]
 > This app is unsigned. After installing on any Mac, run this command in Terminal before opening it:
 > ```bash
