@@ -52,8 +52,8 @@ Requirements:
 - Xcode command line tools
 
 ```bash
-git clone https://github.com/collinp2/testing.git
-cd testing
+git clone https://github.com/collinp2/cp_software.git
+cd cp_software
 git checkout claude/ir-capture-app
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
