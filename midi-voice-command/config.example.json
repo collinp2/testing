@@ -1,0 +1,15 @@
+{
+  "midiDevice": "",
+  "midiChannel": 1,
+  "port": 3000,
+  "oauth": {
+    "clientId": "midi-client",
+    "clientSecret": "generate-with-crypto-randomBytes-32-hex",
+    "accessToken": "generate-with-crypto-randomBytes-32-hex"
+  },
+  "commands": {
+    "channel 1": { "cc": 1, "value": 127 },
+    "channel 2": { "cc": 2, "value": 127 },
+    "channel 3": { "cc": 3, "value": 127 }
+  }
+}
