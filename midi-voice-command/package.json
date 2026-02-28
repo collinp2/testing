@@ -1,0 +1,17 @@
+{
+  "name": "midi-voice-command",
+  "version": "1.0.0",
+  "description": "Google Home voice command to MIDI CC bridge",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^5.2.1",
+    "midi": "^2.0.0"
+  }
+}
