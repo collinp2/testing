@@ -15,9 +15,9 @@
     "slot 3": { "cc": 52, "value": 127 },
     "slot 4": { "cc": 53, "value": 127 },
     "slot 5": { "cc": 54, "value": 127 },
-    "play": { "hui": "play" },
-    "stop": { "hui": "stop" },
-    "start recording": { "hui": "record_start" },
-    "stop recording": { "hui": "stop" }
+    "play": { "os": "play" },
+    "stop": { "os": "stop" },
+    "start recording": { "os": "record_start" },
+    "stop recording": { "os": "stop" }
   }
 }

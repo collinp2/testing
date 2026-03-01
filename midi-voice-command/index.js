@@ -2,6 +2,7 @@ const midi = require('midi');
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const { execFile } = require('child_process');
 
 const configPath = path.join(__dirname, 'config.json');
 let config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
@@ -56,6 +57,7 @@ function sendCC(cc, value) {
 
 let huiOutput = null;
 let huiInput = null;
+let mmcOutput = null;
 
 function findOutputPort(out, name) {
   for (let i = 0; i < out.getPortCount(); i++) {
@@ -87,11 +89,15 @@ function initHUI() {
   huiInput = new midi.Input();
   huiInput.ignoreTypes(false, true, true); // enable SysEx, ignore timing/activeSensing
   huiInput.on('message', (_deltaTime, message) => {
-    // Echo Pro Tools ping back (F0 00 00 66 05 ...)
-    if (message[0] === 0xF0 && message[1] === 0x00 && message[2] === 0x00 &&
-        message[3] === 0x66 && message[4] === 0x05) {
-      console.log('HUI ping received, sending pong');
-      if (huiOutput) huiOutput.sendMessage(Array.from(message));
+    if (message[0] === 0xF0) {
+      // SysEx ping — echo back
+      if (message[1] === 0x00 && message[2] === 0x00 &&
+          message[3] === 0x66 && message[4] === 0x05) {
+        if (huiOutput) huiOutput.sendMessage(Array.from(message));
+      }
+    } else if (message[0] === 0x80 && message[1] === 0x00 && message[2] === 0x40) {
+      // HUI keepalive (Note Off 0x00 0x40) — respond with Note On to confirm online
+      if (huiOutput) huiOutput.sendMessage([0x90, 0x00, 0x00]);
     }
   });
   const inIdx = findInputPort(huiInput, config.huiInputDevice);
@@ -102,58 +108,113 @@ function initHUI() {
   }
   huiInput.openPort(inIdx);
   console.log(`HUI input connected: ${huiInput.getPortName(inIdx)}`);
+
+  // Announce ourselves to Pro Tools (Note On = online, SysEx ping)
+  huiOutput.sendMessage([0x90, 0x00, 0x00]);
+  huiOutput.sendMessage([0xF0, 0x00, 0x00, 0x66, 0x05, 0x00, 0x00, 0xF7]);
+  console.log('HUI: sent initial online announcement + ping to Pro Tools');
 }
 
 // HUI button press/release: CC 12 = zone select, CC 44 = port (|0x40 for press)
+// Both messages sent synchronously so nothing can be interleaved between them
 function sendHUIButton(zone, port, pressed) {
-  huiOutput.sendMessage([0xB0, 12, zone]);
-  huiOutput.sendMessage([0xB0, 44, pressed ? (port | 0x40) : port]);
+  const msg1 = [0xB0, 12, zone];
+  const msg2 = [0xB0, 44, pressed ? (port | 0x40) : port];
+  console.log(`HUI bytes: ${msg1.map(b => b.toString(16).padStart(2,'0')).join(' ')} | ${msg2.map(b => b.toString(16).padStart(2,'0')).join(' ')}`);
+  huiOutput.sendMessage(msg1);
+  huiOutput.sendMessage(msg2);
 }
 
-const HUI_TRANSPORT_ZONE = 0x0E;
-const HUI_PORT = { RECORD: 0, PLAY: 2, STOP: 3 };
+// --- OS transport (AppleScript keystrokes to Pro Tools) ---
 
-function sendHUITransport(action) {
-  if (!huiOutput) {
-    console.warn('HUI output not connected');
+function sendOSTransport(action) {
+  let args;
+  switch (action) {
+    case 'play':
+    case 'stop':
+      // Activate Pro Tools, then send spacebar (play/stop toggle)
+      args = [
+        '-e', 'tell application "Pro Tools" to activate',
+        '-e', 'delay 0.2',
+        '-e', 'tell application "System Events" to tell process "Pro Tools" to key code 49'
+      ];
+      break;
+    case 'record_start':
+      // Activate Pro Tools, then send Cmd+spacebar (record + play)
+      args = [
+        '-e', 'tell application "Pro Tools" to activate',
+        '-e', 'delay 0.2',
+        '-e', 'tell application "System Events" to tell process "Pro Tools" to key code 49 using command down'
+      ];
+      break;
+    default:
+      console.warn(`Unknown OS transport action: ${action}`);
+      return;
+  }
+  execFile('osascript', args, (err) => {
+    if (err) console.error(`OS transport error: ${err.message}`);
+    else console.log(`OS transport: ${action}`);
+  });
+}
+
+// --- MMC (MIDI Machine Control) transport ---
+// Sent via the same huiOutput (Bus 3). Requires Pro Tools MMC slave enabled on Bus 3.
+
+function sendMMCTransport(action) {
+  const out = mmcOutput || huiOutput;
+  if (!out) {
+    console.warn('MMC output not connected');
     return;
   }
   switch (action) {
     case 'play':
-      sendHUIButton(HUI_TRANSPORT_ZONE, HUI_PORT.PLAY, true);
-      setTimeout(() => sendHUIButton(HUI_TRANSPORT_ZONE, HUI_PORT.PLAY, false), 50);
-      console.log('HUI: Play');
+      out.sendMessage([0xF0, 0x7F, 0x7F, 0x06, 0x02, 0xF7]);
+      console.log('MMC: Play');
       break;
     case 'stop':
-      sendHUIButton(HUI_TRANSPORT_ZONE, HUI_PORT.STOP, true);
-      setTimeout(() => sendHUIButton(HUI_TRANSPORT_ZONE, HUI_PORT.STOP, false), 50);
-      console.log('HUI: Stop');
+      out.sendMessage([0xF0, 0x7F, 0x7F, 0x06, 0x01, 0xF7]);
+      console.log('MMC: Stop');
       break;
     case 'record_start':
-      // Press Record to arm, then Play to start recording
-      sendHUIButton(HUI_TRANSPORT_ZONE, HUI_PORT.RECORD, true);
-      setTimeout(() => sendHUIButton(HUI_TRANSPORT_ZONE, HUI_PORT.RECORD, false), 50);
-      setTimeout(() => sendHUIButton(HUI_TRANSPORT_ZONE, HUI_PORT.PLAY, true), 100);
-      setTimeout(() => sendHUIButton(HUI_TRANSPORT_ZONE, HUI_PORT.PLAY, false), 150);
-      console.log('HUI: Record Start');
+      // Record Strobe (arm) then Play
+      out.sendMessage([0xF0, 0x7F, 0x7F, 0x06, 0x06, 0xF7]);
+      setTimeout(() => out.sendMessage([0xF0, 0x7F, 0x7F, 0x06, 0x02, 0xF7]), 50);
+      console.log('MMC: Record Start');
       break;
     default:
-      console.warn(`Unknown HUI action: ${action}`);
+      console.warn(`Unknown MMC action: ${action}`);
   }
 }
 
 initHUI();
 
+function initMMC() {
+  if (!config.mmcOutputDevice) return;
+  mmcOutput = new midi.Output();
+  const idx = findOutputPort(mmcOutput, config.mmcOutputDevice);
+  if (idx === -1) {
+    console.error(`MMC output device "${config.mmcOutputDevice}" not found`);
+    mmcOutput = null;
+    return;
+  }
+  mmcOutput.openPort(idx);
+  console.log(`MMC output connected: ${mmcOutput.getPortName(idx)}`);
+}
+
+initMMC();
+
 process.on('SIGTERM', () => {
   output.closePort();
   if (huiOutput) huiOutput.closePort();
   if (huiInput) huiInput.closePort();
+  if (mmcOutput) mmcOutput.closePort();
   process.exit(0);
 });
 process.on('SIGINT', () => {
   output.closePort();
   if (huiOutput) huiOutput.closePort();
   if (huiInput) huiInput.closePort();
+  if (mmcOutput) mmcOutput.closePort();
   process.exit(0);
 });
 
@@ -240,8 +301,10 @@ function handleSync(requestId) {
 }
 
 function dispatchCommand(match) {
-  if (match.hui) {
-    sendHUITransport(match.hui);
+  if (match.os) {
+    sendOSTransport(match.os);
+  } else if (match.mmc) {
+    sendMMCTransport(match.mmc);
   } else {
     sendCC(match.cc, match.value);
   }
@@ -305,6 +368,21 @@ app.get('/devices', (_req, res) => {
 
 app.get('/commands', (_req, res) => {
   res.json(config.commands);
+});
+
+// HUI raw test — try arbitrary zone/port to find the right mapping
+app.post('/hui-test', (req, res) => {
+  const zone = parseInt(req.body.zone, 16);
+  const port = parseInt(req.body.port, 16);
+  if (!huiOutput) return res.status(503).json({ error: 'HUI not connected' });
+  console.log(`HUI test: zone 0x${zone.toString(16)} port 0x${port.toString(16)}`);
+  huiOutput.sendMessage([0xB0, 12, zone]);
+  huiOutput.sendMessage([0xB0, 44, port | 0x40]);
+  setTimeout(() => {
+    huiOutput.sendMessage([0xB0, 12, zone]);
+    huiOutput.sendMessage([0xB0, 44, port]);
+  }, 100);
+  res.json({ zone: zone.toString(16), port: port.toString(16) });
 });
 
 // Manual trigger for testing without Google Home

@@ -153,7 +153,65 @@ The server will now start automatically at login and restart if it crashes.
 
 ---
 
+## Pro Tools Transport Control (Optional)
+
+Voice commands can control Pro Tools transport (play, stop, record) via AppleScript keystrokes.
+
+### Setup
+
+**1. Enable IAC Driver buses in Audio MIDI Setup:**
+
+Open `/System/Applications/Utilities/Audio MIDI Setup.app` → Window → Show MIDI Studio → double-click IAC Driver → add at least 2 buses (Bus 2 and Bus 3) → check "Device is online".
+
+**2. Configure Pro Tools HUI peripheral:**
+
+In Pro Tools: Setup → Peripherals → MIDI Controllers tab → add a controller:
+- Type: `HUI`
+- Receive From: `IAC Driver Bus 3`
+- Send To: `IAC Driver Bus 2`
+- \# Ch's: `8`
+
+This keeps Pro Tools in sync with the server (ping/pong keepalive). Restart Pro Tools after saving.
+
+**3. Add fields to config.json:**
+
+```json
+{
+  "huiOutputDevice": "IAC Driver Bus 3",
+  "huiInputDevice": "IAC Driver Bus 2",
+  "mmcOutputDevice": "IAC Driver Bus 1"
+}
+```
+
+**4. Grant Accessibility permission to Node:**
+
+The server uses AppleScript to send keystrokes to Pro Tools. macOS requires an Accessibility permission for this.
+
+Go to System Settings → Privacy & Security → Accessibility → click **+** and add your Node.js binary (e.g. `/opt/homebrew/bin/node`).
+
+To find your Node binary path:
+```bash
+which node
+```
+
+**5. Add transport commands to config.json:**
+
+```json
+"commands": {
+  "play": { "os": "play" },
+  "stop": { "os": "stop" },
+  "start recording": { "os": "record_start" },
+  "stop recording": { "os": "stop" }
+}
+```
+
+Restart the server after updating config.json. Say "Hey Google, sync my devices" so Google picks up the new commands.
+
+---
+
 ## Usage
+
+**MIDI CC commands:**
 
 | Say | MIDI CC sent |
 |-----|-------------|
@@ -162,6 +220,15 @@ The server will now start automatically at login and restart if it crashes.
 | "Hey Google, activate slot 3" | CC 52 |
 | "Hey Google, activate slot 4" | CC 53 |
 | "Hey Google, activate slot 5" | CC 54 |
+
+**Pro Tools transport (requires setup above):**
+
+| Say | Action |
+|-----|--------|
+| "Hey Google, activate play" | Play |
+| "Hey Google, activate stop" | Stop |
+| "Hey Google, activate start recording" | Record + Play |
+| "Hey Google, activate stop recording" | Stop |
 
 ---
 
