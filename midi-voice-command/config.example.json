@@ -2,6 +2,8 @@
   "midiDevice": "",
   "midiChannel": 1,
   "port": 3000,
+  "huiOutputDevice": "IAC Driver Bus 2",
+  "huiInputDevice": "IAC Driver Bus 3",
   "oauth": {
     "clientId": "midi-client",
     "clientSecret": "generate-with-crypto-randomBytes-32-hex",
@@ -12,6 +14,10 @@
     "slot 2": { "cc": 51, "value": 127 },
     "slot 3": { "cc": 52, "value": 127 },
     "slot 4": { "cc": 53, "value": 127 },
-    "slot 5": { "cc": 54, "value": 127 }
+    "slot 5": { "cc": 54, "value": 127 },
+    "play": { "hui": "play" },
+    "stop": { "hui": "stop" },
+    "start recording": { "hui": "record_start" },
+    "stop recording": { "hui": "stop" }
   }
 }

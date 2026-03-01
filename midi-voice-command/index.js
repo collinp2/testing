@@ -52,8 +52,110 @@ function sendCC(cc, value) {
   console.log(`Sent CC ${cc} value ${value} on channel ${channel + 1}`);
 }
 
-process.on('SIGTERM', () => { output.closePort(); process.exit(0); });
-process.on('SIGINT',  () => { output.closePort(); process.exit(0); });
+// --- HUI setup (Pro Tools transport control) ---
+
+let huiOutput = null;
+let huiInput = null;
+
+function findOutputPort(out, name) {
+  for (let i = 0; i < out.getPortCount(); i++) {
+    if (out.getPortName(i).includes(name)) return i;
+  }
+  return -1;
+}
+
+function findInputPort(inp, name) {
+  for (let i = 0; i < inp.getPortCount(); i++) {
+    if (inp.getPortName(i).includes(name)) return i;
+  }
+  return -1;
+}
+
+function initHUI() {
+  if (!config.huiOutputDevice || !config.huiInputDevice) return;
+
+  huiOutput = new midi.Output();
+  const outIdx = findOutputPort(huiOutput, config.huiOutputDevice);
+  if (outIdx === -1) {
+    console.error(`HUI output device "${config.huiOutputDevice}" not found`);
+    huiOutput = null;
+    return;
+  }
+  huiOutput.openPort(outIdx);
+  console.log(`HUI output connected: ${huiOutput.getPortName(outIdx)}`);
+
+  huiInput = new midi.Input();
+  huiInput.ignoreTypes(false, true, true); // enable SysEx, ignore timing/activeSensing
+  huiInput.on('message', (_deltaTime, message) => {
+    // Echo Pro Tools ping back (F0 00 00 66 05 ...)
+    if (message[0] === 0xF0 && message[1] === 0x00 && message[2] === 0x00 &&
+        message[3] === 0x66 && message[4] === 0x05) {
+      console.log('HUI ping received, sending pong');
+      if (huiOutput) huiOutput.sendMessage(Array.from(message));
+    }
+  });
+  const inIdx = findInputPort(huiInput, config.huiInputDevice);
+  if (inIdx === -1) {
+    console.error(`HUI input device "${config.huiInputDevice}" not found`);
+    huiInput = null;
+    return;
+  }
+  huiInput.openPort(inIdx);
+  console.log(`HUI input connected: ${huiInput.getPortName(inIdx)}`);
+}
+
+// HUI button press/release: CC 12 = zone select, CC 44 = port (|0x40 for press)
+function sendHUIButton(zone, port, pressed) {
+  huiOutput.sendMessage([0xB0, 12, zone]);
+  huiOutput.sendMessage([0xB0, 44, pressed ? (port | 0x40) : port]);
+}
+
+const HUI_TRANSPORT_ZONE = 0x0E;
+const HUI_PORT = { RECORD: 0, PLAY: 2, STOP: 3 };
+
+function sendHUITransport(action) {
+  if (!huiOutput) {
+    console.warn('HUI output not connected');
+    return;
+  }
+  switch (action) {
+    case 'play':
+      sendHUIButton(HUI_TRANSPORT_ZONE, HUI_PORT.PLAY, true);
+      setTimeout(() => sendHUIButton(HUI_TRANSPORT_ZONE, HUI_PORT.PLAY, false), 50);
+      console.log('HUI: Play');
+      break;
+    case 'stop':
+      sendHUIButton(HUI_TRANSPORT_ZONE, HUI_PORT.STOP, true);
+      setTimeout(() => sendHUIButton(HUI_TRANSPORT_ZONE, HUI_PORT.STOP, false), 50);
+      console.log('HUI: Stop');
+      break;
+    case 'record_start':
+      // Press Record to arm, then Play to start recording
+      sendHUIButton(HUI_TRANSPORT_ZONE, HUI_PORT.RECORD, true);
+      setTimeout(() => sendHUIButton(HUI_TRANSPORT_ZONE, HUI_PORT.RECORD, false), 50);
+      setTimeout(() => sendHUIButton(HUI_TRANSPORT_ZONE, HUI_PORT.PLAY, true), 100);
+      setTimeout(() => sendHUIButton(HUI_TRANSPORT_ZONE, HUI_PORT.PLAY, false), 150);
+      console.log('HUI: Record Start');
+      break;
+    default:
+      console.warn(`Unknown HUI action: ${action}`);
+  }
+}
+
+initHUI();
+
+process.on('SIGTERM', () => {
+  output.closePort();
+  if (huiOutput) huiOutput.closePort();
+  if (huiInput) huiInput.closePort();
+  process.exit(0);
+});
+process.on('SIGINT', () => {
+  output.closePort();
+  if (huiOutput) huiOutput.closePort();
+  if (huiInput) huiInput.closePort();
+  process.exit(0);
+});
 
 // --- Express setup ---
 
@@ -137,6 +239,14 @@ function handleSync(requestId) {
   };
 }
 
+function dispatchCommand(match) {
+  if (match.hui) {
+    sendHUITransport(match.hui);
+  } else {
+    sendCC(match.cc, match.value);
+  }
+}
+
 function handleExecute(requestId, payload) {
   const results = [];
   for (const command of payload.commands) {
@@ -144,7 +254,7 @@ function handleExecute(requestId, payload) {
       const name = commandName(device.id);
       const match = config.commands[name];
       if (match) {
-        sendCC(match.cc, match.value);
+        dispatchCommand(match);
         results.push({ ids: [device.id], status: 'SUCCESS' });
       } else {
         console.warn(`Unknown command: "${name}"`);
@@ -202,8 +312,8 @@ app.post('/command', (req, res) => {
   const name = (req.body.command || '').toLowerCase().trim();
   const match = config.commands[name];
   if (!match) return res.status(404).json({ error: `Unknown command: "${name}"` });
-  sendCC(match.cc, match.value);
-  res.json({ ok: true, command: name, cc: match.cc, value: match.value });
+  dispatchCommand(match);
+  res.json({ ok: true, command: name });
 });
 
 const PORT = config.port || 3000;
