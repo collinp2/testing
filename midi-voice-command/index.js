@@ -61,6 +61,12 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Log every incoming request and body
+app.use((req, _res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`, JSON.stringify(req.body) || '');
+  next();
+});
+
 // --- OAuth 2.0 (required by Google Smart Home) ---
 // Minimal implementation for personal use — no real user accounts needed.
 
@@ -86,8 +92,9 @@ app.post('/oauth/token', (req, res) => {
   }
   res.json({
     access_token: config.oauth.accessToken,
+    refresh_token: config.oauth.accessToken + '_refresh',
     token_type: 'Bearer',
-    expires_in: 315360000 // 10 years — effectively permanent for personal use
+    expires_in: 315360000
   });
 });
 
@@ -148,9 +155,12 @@ function handleExecute(requestId, payload) {
   return { requestId, payload: { commands: results } };
 }
 
-function handleQuery(requestId) {
-  // Scenes don't have queryable state
-  return { requestId, payload: { devices: {} } };
+function handleQuery(requestId, payload) {
+  const devices = {};
+  for (const device of (payload?.devices || [])) {
+    devices[device.id] = { online: true };
+  }
+  return { requestId, payload: { devices } };
 }
 
 app.post('/fulfillment', (req, res) => {
@@ -166,7 +176,7 @@ app.post('/fulfillment', (req, res) => {
     return res.json(handleExecute(requestId, input.payload));
   }
   if (input.intent === 'action.devices.QUERY') {
-    return res.json(handleQuery(requestId));
+    return res.json(handleQuery(requestId, input.payload));
   }
 
   res.status(400).json({ error: 'Unknown intent' });
