@@ -8,8 +8,10 @@
     "accessToken": "generate-with-crypto-randomBytes-32-hex"
   },
   "commands": {
-    "channel 1": { "cc": 1, "value": 127 },
-    "channel 2": { "cc": 2, "value": 127 },
-    "channel 3": { "cc": 3, "value": 127 }
+    "slot 1": { "cc": 50, "value": 127 },
+    "slot 2": { "cc": 51, "value": 127 },
+    "slot 3": { "cc": 52, "value": 127 },
+    "slot 4": { "cc": 53, "value": 127 },
+    "slot 5": { "cc": 54, "value": 127 }
   }
 }
