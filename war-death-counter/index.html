@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #ffffff;
+    color: #1a1a1a;
+    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+    height: 300px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 14px 18px 12px;
+    -webkit-app-region: drag;
+    user-select: none;
+  }
+
+  h1 {
+    font-size: 0.62rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #999;
+    margin-bottom: 14px;
+    font-weight: 500;
+  }
+
+  .counters {
+    display: flex;
+    gap: 14px;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .counter {
+    flex: 1;
+    text-align: center;
+    border-top: 2px solid #cc0000;
+    padding-top: 8px;
+  }
+
+  .flag { font-size: 1.8rem; line-height: 1; margin-bottom: 3px; }
+
+  .country {
+    font-size: 0.52rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: #888;
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+
+  .label {
+    font-size: 0.48rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #bbb;
+    margin-bottom: 3px;
+  }
+
+  .number {
+    font-size: 1.9rem;
+    font-weight: 700;
+    color: #cc0000;
+    letter-spacing: 0.02em;
+  }
+
+  .total-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-top: 10px;
+    border-top: 1px solid #e8e8e8;
+    padding-top: 8px;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .total-label {
+    font-size: 0.6rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #888;
+    font-weight: 600;
+  }
+
+  .total-number {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #880000;
+  }
+
+  .footer {
+    margin-top: 6px;
+    font-size: 0.55rem;
+    color: #bbb;
+    letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body>
+
+<h1>2026 US · Israel · Iran War</h1>
+
+<div class="counters">
+  <div class="counter">
+    <div class="flag">🇮🇷</div>
+    <div class="country">Iran</div>
+    <div class="label">Deaths</div>
+    <div class="number" id="num-iran">—</div>
+  </div>
+  <div class="counter">
+    <div class="flag">🇮🇱</div>
+    <div class="country">Israel</div>
+    <div class="label">Deaths</div>
+    <div class="number" id="num-israel">—</div>
+  </div>
+  <div class="counter">
+    <div class="flag">🇺🇸</div>
+    <div class="country">United States</div>
+    <div class="label">Deaths</div>
+    <div class="number" id="num-us">—</div>
+  </div>
+  <div class="counter">
+    <div class="flag">🌍</div>
+    <div class="country">Gulf States</div>
+    <div class="label">Deaths</div>
+    <div class="number" id="num-gulf">—</div>
+  </div>
+</div>
+
+<div class="total-row">
+  <span class="total-label">Total Deaths</span>
+  <span class="total-number" id="num-total">—</span>
+</div>
+
+<div class="footer" id="footer">Loading…</div>
+
+<script>
+  let prev = { iran: 0, israel: 0, us: 0, gulf: 0 };
+
+  function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+
+  function animateTo(id, from, to, ms) {
+    if (to === null || isNaN(to)) return;
+    const el = document.getElementById(id);
+    const start = performance.now();
+    (function frame(now) {
+      const t = Math.min((now - start) / ms, 1);
+      el.textContent = Math.round(from + (to - from) * easeOut(t)).toLocaleString();
+      if (t < 1) requestAnimationFrame(frame);
+      else el.textContent = to.toLocaleString();
+    })(start);
+  }
+
+  function updateData(data) {
+    animateTo('num-iran',   prev.iran,   data.iran,   1800);
+    animateTo('num-israel', prev.israel, data.israel, 1800);
+    animateTo('num-us',     prev.us,     data.us,     1800);
+    animateTo('num-gulf',   prev.gulf,   data.gulf,   1800);
+    const total = (data.iran || 0) + (data.israel || 0) + (data.us || 0) + (data.gulf || 0);
+    const prevTotal = prev.iran + prev.israel + prev.us + prev.gulf;
+    animateTo('num-total', prevTotal, total, 1800);
+    prev = { iran: data.iran || 0, israel: data.israel || 0, us: data.us || 0, gulf: data.gulf || 0 };
+
+    if (data.updated) {
+      try {
+        const d = new Date(data.updated);
+        document.getElementById('footer').textContent =
+          'Updated ' + d.toLocaleString(undefined, {
+            month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+          }) + ' · Source: Al Jazeera';
+      } catch (_) {}
+    }
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "war-death-counter",
+  "version": "1.0.0",
+  "description": "Menu bar app showing live US/Israel/Iran war death counts",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron": "^34.0.0"
+  }
+}

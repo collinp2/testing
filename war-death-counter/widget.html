@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #0a0a0a;
+    color: #e0e0e0;
+    font-family: 'Courier New', Courier, monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1rem;
+  }
+
+  h1 {
+    font-size: 0.85rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #666;
+    margin-bottom: 2.5rem;
+    text-align: center;
+  }
+
+  .counters {
+    display: flex;
+    gap: 3rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    width: 100%;
+    max-width: 900px;
+  }
+
+  .counter {
+    flex: 1;
+    min-width: 220px;
+    max-width: 280px;
+    text-align: center;
+    border: 1px solid #1e1e1e;
+    border-top: 3px solid #c00;
+    padding: 1.5rem 1rem 1.2rem;
+    background: #111;
+    position: relative;
+  }
+
+  .flag {
+    font-size: 2.8rem;
+    line-height: 1;
+    margin-bottom: 0.5rem;
+  }
+
+  .country-name {
+    font-size: 0.7rem;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: #888;
+    margin-bottom: 1.2rem;
+  }
+
+  .label {
+    font-size: 0.6rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #c00;
+    margin-bottom: 0.3rem;
+  }
+
+  .number {
+    font-size: 3.4rem;
+    font-weight: bold;
+    color: #ff2222;
+    letter-spacing: 0.05em;
+    line-height: 1;
+    min-height: 1.2em;
+    transition: color 0.3s;
+  }
+
+  .number.updated {
+    color: #ff6666;
+  }
+
+  .footer {
+    margin-top: 2rem;
+    font-size: 0.65rem;
+    color: #444;
+    text-align: center;
+    letter-spacing: 0.05em;
+    line-height: 1.8;
+  }
+
+  .footer a {
+    color: #555;
+  }
+
+  .status {
+    font-size: 0.6rem;
+    color: #333;
+    margin-top: 0.4rem;
+    letter-spacing: 0.1em;
+  }
+</style>
+</head>
+<body>
+
+<h1>2026 US &#8211; Israel &#8211; Iran War &nbsp;|&nbsp; Confirmed Deaths</h1>
+
+<div class="counters">
+  <div class="counter">
+    <div class="flag">🇮🇷</div>
+    <div class="country-name">Iran</div>
+    <div class="label">Deaths</div>
+    <div class="number" id="num-iran">—</div>
+  </div>
+  <div class="counter">
+    <div class="flag">🇮🇱</div>
+    <div class="country-name">Israel</div>
+    <div class="label">Deaths</div>
+    <div class="number" id="num-israel">—</div>
+  </div>
+  <div class="counter">
+    <div class="flag">🇺🇸</div>
+    <div class="country-name">United States</div>
+    <div class="label">Deaths</div>
+    <div class="number" id="num-us">—</div>
+  </div>
+</div>
+
+<div class="footer">
+  Source: <a href="https://en.wikipedia.org/wiki/2026_Israeli%E2%80%93United_States_strikes_on_Iran" target="_blank">Wikipedia</a>
+  &nbsp;·&nbsp; Updated hourly
+  <div class="status" id="status">Loading&hellip;</div>
+</div>
+
+<script>
+  // ─── CONFIGURATION ───────────────────────────────────────────────────────
+  // Replace this with your Google Sheet's "Publish to web" CSV URL.
+  // File → Share → Publish to web → Sheet1 → CSV → Publish → copy URL
+  const SHEET_CSV_URL = 'PASTE_YOUR_SHEET_CSV_URL_HERE';
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const REFRESH_MS = 30 * 60 * 1000; // re-fetch every 30 minutes
+
+  let current = { iran: 0, israel: 0, us: 0 };
+
+  async function fetchData() {
+    try {
+      const resp = await fetch(SHEET_CSV_URL + '&cachebust=' + Date.now());
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const text = await resp.text();
+      return parseCSV(text);
+    } catch (e) {
+      console.error('Fetch failed:', e);
+      return null;
+    }
+  }
+
+  function parseCSV(text) {
+    const rows = text.trim().split('\n').map(r => r.split(','));
+    const data = {};
+    for (const [key, val] of rows) {
+      if (key && val !== undefined) data[key.trim().toLowerCase()] = val.trim();
+    }
+    return {
+      iran:    parseInt(data['iran'], 10)           || null,
+      israel:  parseInt(data['israel'], 10)         || null,
+      us:      parseInt(data['united states'], 10)  || null,
+      updated: data['updated'] || null,
+    };
+  }
+
+  // Ease-out cubic: fast start, slow finish
+  function easeOut(t) {
+    return 1 - Math.pow(1 - t, 3);
+  }
+
+  function animateNumber(elementId, from, to, duration) {
+    const el = document.getElementById(elementId);
+    if (!el || to === null || isNaN(to)) return;
+    const start = performance.now();
+    function frame(now) {
+      const elapsed = now - start;
+      const t = Math.min(elapsed / duration, 1);
+      const value = Math.round(from + (to - from) * easeOut(t));
+      el.textContent = value.toLocaleString();
+      if (t < 1) {
+        requestAnimationFrame(frame);
+      } else {
+        el.textContent = to.toLocaleString();
+        el.classList.add('updated');
+        setTimeout(() => el.classList.remove('updated'), 600);
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+
+  function formatUpdated(iso) {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      return 'Last updated ' + d.toLocaleString(undefined, {
+        month: 'short', day: 'numeric', year: 'numeric',
+        hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+      });
+    } catch (_) {
+      return iso;
+    }
+  }
+
+  async function refresh() {
+    const data = await fetchData();
+    if (!data) {
+      document.getElementById('status').textContent = 'Could not reach data source — retrying in 30 min';
+      return;
+    }
+
+    animateNumber('num-iran',   current.iran,   data.iran,   2500);
+    animateNumber('num-israel', current.israel, data.israel, 2500);
+    animateNumber('num-us',     current.us,     data.us,     2500);
+
+    if (data.iran   !== null) current.iran   = data.iran;
+    if (data.israel !== null) current.israel = data.israel;
+    if (data.us     !== null) current.us     = data.us;
+
+    document.getElementById('status').textContent = formatUpdated(data.updated);
+  }
+
+  // Initial load
+  refresh();
+
+  // Auto-refresh every 30 minutes
+  setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>
