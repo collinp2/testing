@@ -147,6 +147,14 @@ function sendOSTransport(action) {
         '-e', 'tell application "System Events" to tell process "Pro Tools" to key code 49 using command down'
       ];
       break;
+    case 'go_to_beginning':
+      // Activate Pro Tools, then send Return key (go to beginning)
+      args = [
+        '-e', 'tell application "Pro Tools" to activate',
+        '-e', 'delay 0.2',
+        '-e', 'tell application "System Events" to tell process "Pro Tools" to key code 36'
+      ];
+      break;
     default:
       console.warn(`Unknown OS transport action: ${action}`);
       return;
