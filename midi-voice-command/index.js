@@ -310,7 +310,9 @@ function handleSync(requestId) {
 }
 
 function dispatchCommand(match) {
-  if (match.os) {
+  if (match.multi) {
+    match.multi.forEach((m, i) => setTimeout(() => sendCC(m.cc, m.value), i * 50));
+  } else if (match.os) {
     sendOSTransport(match.os);
   } else if (match.mmc) {
     sendMMCTransport(match.mmc);
