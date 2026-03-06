@@ -89,6 +89,8 @@ This gives the server a permanent public HTTPS URL so Google can reach it.
 brew install cloudflare/cloudflare/cloudflared
 ```
 
+> **No Homebrew / no sudo?** See the [cloudflared as a user LaunchAgent](#cloudflared-as-a-user-launchagent) section below.
+
 **Create a named tunnel via the Zero Trust dashboard:**
 1. Go to [one.dash.cloudflare.com](https://one.dash.cloudflare.com) → Networks → Tunnels
 2. Click **Create a tunnel** → select **Cloudflared** → name it `midi-voice`
@@ -104,6 +106,8 @@ brew install cloudflare/cloudflare/cloudflared
 ```bash
 curl https://midi.yourdomain.com/commands
 ```
+
+> **Only run cloudflared on one Mac at a time.** If you move the app to a new machine, stop cloudflared on the old one first. Running two connectors on the same tunnel causes intermittent 502 errors as Cloudflare load-balances between them. See [Troubleshooting](#troubleshooting) for details.
 
 ---
 
@@ -259,8 +263,11 @@ kill -HUP $(lsof -ti :3000)
 # Live log
 tail -f ~/Library/Logs/midi-voice-command.log
 
-# Cloudflare tunnel log
+# Cloudflare tunnel log (system daemon via sudo install)
 tail -f /Library/Logs/com.cloudflare.cloudflared.err.log
+
+# Cloudflare tunnel log (user LaunchAgent)
+tail -f ~/Library/Logs/cloudflared.log
 ```
 
 ---
@@ -281,6 +288,65 @@ launchctl load ~/Library/LaunchAgents/com.collinpeterson.midi-voice-command.plis
 
 ---
 
+## cloudflared as a user LaunchAgent
+
+Use this approach instead of `sudo cloudflared service install` if you don't have Homebrew or can't run sudo.
+
+**1. Download cloudflared manually:**
+```bash
+# Get the latest release URL from https://github.com/cloudflare/cloudflared/releases
+# For Apple Silicon:
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-arm64.tgz -o /tmp/cloudflared.tgz
+tar -xzf /tmp/cloudflared.tgz -C /tmp
+mkdir -p ~/.local/bin
+mv /tmp/cloudflared ~/.local/bin/cloudflared
+chmod +x ~/.local/bin/cloudflared
+```
+
+**2. Create a LaunchAgent plist** at `~/Library/LaunchAgents/com.yourname.cloudflared.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.yourname.cloudflared</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/path/to/cloudflared</string>
+        <string>tunnel</string>
+        <string>--no-autoupdate</string>
+        <string>run</string>
+        <string>--token</string>
+        <string>YOUR_TUNNEL_TOKEN</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/yourusername/Library/Logs/cloudflared.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/yourusername/Library/Logs/cloudflared.log</string>
+</dict>
+</plist>
+```
+
+Get your tunnel token from the Zero Trust dashboard: Networks → Tunnels → your tunnel → Configure → click the token to copy it.
+
+**3. Load it:**
+```bash
+launchctl load ~/Library/LaunchAgents/com.yourname.cloudflared.plist
+```
+
+**Restart cloudflared:**
+```bash
+launchctl kickstart -k gui/$(id -u)/com.yourname.cloudflared
+```
+
+---
+
 ## Troubleshooting
 
 **Server won't start — MIDI device not found**
@@ -296,3 +362,12 @@ Say "Hey Google, sync my devices" after editing `config.json`.
 
 **Re-link after changing the fulfillment URL**
 Unlink MIDI Voice in the Google Home app (Settings → Works with Google) then re-link.
+
+**502 Bad Gateway / "cannot reach MIDI Voice" after moving to a new Mac**
+You likely have cloudflared running on two machines simultaneously. Cloudflare load-balances between all active connectors on a tunnel — requests that land on the old machine return 502 if the server isn't running there.
+
+Fix: stop cloudflared on the old Mac:
+```bash
+launchctl unload ~/Library/LaunchAgents/com.yourname.cloudflared.plist
+```
+Wait a few seconds for Cloudflare to clear the old connections, then retry.

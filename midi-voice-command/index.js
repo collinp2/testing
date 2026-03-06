@@ -226,7 +226,8 @@ app.use(express.urlencoded({ extended: true }));
 
 // Log every incoming request and body
 app.use((req, _res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`, JSON.stringify(req.body) || '');
+  const qs = Object.keys(req.query).length ? ' ?' + new URLSearchParams(req.query).toString() : '';
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}${qs}`, JSON.stringify(req.body) || '');
   next();
 });
 
