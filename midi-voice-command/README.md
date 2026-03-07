@@ -215,35 +215,85 @@ Restart the server after updating config.json. Say "Hey Google, sync my devices"
 
 ## Usage
 
-**MIDI CC commands:**
+**Kemper slot selection (CC):**
 
-| Say | MIDI CC sent |
-|-----|-------------|
-| "Hey Google, activate slot 1" | CC 50 |
-| "Hey Google, activate slot 2" | CC 51 |
-| "Hey Google, activate slot 3" | CC 52 |
-| "Hey Google, activate slot 4" | CC 53 |
-| "Hey Google, activate slot 5" | CC 54 |
+| Say | MIDI CC |
+|-----|---------|
+| "Hey Google, activate slot 1" | CC 50 value 127 |
+| "Hey Google, activate slot 2" | CC 51 value 127 |
+| "Hey Google, activate slot 3" | CC 52 value 127 |
+| "Hey Google, activate slot 4" | CC 53 value 127 |
+| "Hey Google, activate slot 5" | CC 54 value 127 |
 
-**Pro Tools transport (requires setup above):**
+**Kemper effects (CC):**
+
+| Say | CC | Action |
+|-----|----|--------|
+| "activate Toggle all effects" | CC 16 | Toggle all |
+| "activate A module on/off" | CC 17 | Stomp A |
+| "activate B module on/off" | CC 18 | Stomp B |
+| "activate C module on/off" | CC 19 | Stomp C |
+| "activate D module on/off" | CC 20 | Stomp D |
+| "activate X module on/off" | CC 22 | Stomp X |
+| "activate Modulation on/off" | CC 24 | Mod |
+| "activate DELAY on/off" | CC 27 | Delay |
+| "activate REVERB on/off" | CC 29 | Reverb |
+| "activate Tuner on/off" | CC 31 | Tuner |
+| "activate All effects off" | multi-CC | All off (50ms stagger) |
+| "activate Looper start" | CC 81 | Looper start |
+| "activate Looper stop" | CC 82 | Looper stop |
+
+**Kemper performances (Program Change):**
+
+Each command sends a PC message to load slot 1 of that performance. Both the numbered name and alias work.
+
+| Say (either) | Alias | PC |
+|---|---|---|
+| "activate performance 1" | Little King | 0 |
+| "activate performance 2" | EVH | 5 |
+| "activate performance 3" | Marshall 1 | 10 |
+| "activate performance 4" | Marshall 2 | 15 |
+| "activate performance 5" | Mesa 1 | 20 |
+| "activate performance 6" | Mesa 2 | 25 |
+| "activate performance 7" | California Tweed | 30 |
+| "activate performance 8" | High Gain 1 | 35 |
+| "activate performance 9" | High Gain 2 | 40 |
+| "activate performance 10" | Deluxe Reverb | 45 |
+| "activate performance 11–20" | *(unnamed)* | 50–95 |
+
+PC formula: `(performance# - 1) × 5`. No bank select needed for performances 1–25.
+
+To add an alias for a performance, add an entry alongside the numbered one in `config.json`:
+```json
+"performance 11": { "pc": 50 },
+"My Patch Name": { "pc": 50 }
+```
+
+**Pro Tools transport (requires HUI setup):**
 
 | Say | Action |
 |-----|--------|
-| "Hey Google, activate play" | Play |
-| "Hey Google, activate stop" | Stop |
-| "Hey Google, activate start recording" | Record + Play |
-| "Hey Google, activate stop recording" | Stop |
+| "Hey Google, activate play" | Spacebar (play/stop toggle) |
+| "Hey Google, activate stop" | Spacebar |
+| "Hey Google, activate go to beginning" | Return key |
+| "Hey Google, activate start recording" | Cmd+Spacebar |
+| "Hey Google, activate stop recording" | Spacebar |
 
 ---
 
 ## Managing Commands
 
-Edit `config.json` to add, remove, or change commands. Each entry maps a voice command name to a MIDI CC number and value:
+Edit `config.json` to add, remove, or change commands. Three command types are supported:
 
 ```json
 "commands": {
-  "slot 1": { "cc": 50, "value": 127 },
-  "my custom command": { "cc": 20, "value": 64 }
+  "my CC command":  { "cc": 20, "value": 64 },
+  "my PC command":  { "pc": 10 },
+  "my multi command": { "multi": [
+    { "cc": 17, "value": 0 },
+    { "cc": 18, "value": 0 }
+  ]},
+  "play": { "os": "play" }
 }
 ```
 
