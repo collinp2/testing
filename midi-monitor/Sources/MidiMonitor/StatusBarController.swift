@@ -73,6 +73,10 @@ class StatusBarController {
         tunnelLogs.target = self
         menu.addItem(tunnelLogs)
 
+        let editConfig = NSMenuItem(title: "Edit Config", action: #selector(editConfig), keyEquivalent: "")
+        editConfig.target = self
+        menu.addItem(editConfig)
+
         menu.addItem(.separator())
 
         let quit = NSMenuItem(title: "Quit MidiMonitor", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -138,5 +142,9 @@ class StatusBarController {
 
     @objc private func viewTunnelLogs() {
         NSWorkspace.shared.open(URL(fileURLWithPath: NSHomeDirectory() + "/Library/Logs/cloudflared.log"))
+    }
+
+    @objc private func editConfig() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: NSHomeDirectory() + "/Documents/Claude/midi-voice-command/config.json"))
     }
 }
