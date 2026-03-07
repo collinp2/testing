@@ -7,8 +7,8 @@
   "mmcOutputDevice": "IAC Driver Bus 1",
   "oauth": {
     "clientId": "midi-client",
-    "clientSecret": "f291647a016baf3ab011d8b68ffb6d7d2fa14325682d24e71b2e54e719377692",
-    "accessToken": "7b149325ee52e39565563400db97e5ca855d3091e5ce86ca15c5acf06569fca1"
+    "clientSecret": "YOUR_CLIENT_SECRET",
+    "accessToken": "YOUR_ACCESS_TOKEN"
   },
   "commands": {
     "slot 1": { "cc": 50, "value": 127 },
@@ -45,6 +45,21 @@
       { "cc": 27, "value": 0 },
       { "cc": 29, "value": 0 }
     ]},
+    "set gain 1": { "cc": 72, "value": 32 },
+    "set gain 2": { "cc": 72, "value": 56 },
+    "set gain 3": { "cc": 72, "value": 80 },
+    "set gain 4": { "cc": 72, "value": 104 },
+    "set gain 5": { "cc": 72, "value": 127 },
+    "set delay mix 1": { "cc": 68, "value": 7 },
+    "set delay mix 2": { "cc": 68, "value": 16 },
+    "set delay mix 3": { "cc": 68, "value": 26 },
+    "set delay mix 4": { "cc": 68, "value": 35 },
+    "set delay mix 5": { "cc": 68, "value": 45 },
+    "set reverb mix 1": { "cc": 70, "value": 7 },
+    "set reverb mix 2": { "cc": 70, "value": 16 },
+    "set reverb mix 3": { "cc": 70, "value": 26 },
+    "set reverb mix 4": { "cc": 70, "value": 35 },
+    "set reverb mix 5": { "cc": 70, "value": 45 },
     "Looper start": { "cc": 81, "value": 81 },
     "Looper stop": { "cc": 82, "value": 82 },
     "performance 1": { "pc": 0 },
