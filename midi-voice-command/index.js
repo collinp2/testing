@@ -53,6 +53,12 @@ function sendCC(cc, value) {
   console.log(`Sent CC ${cc} value ${value} on channel ${channel + 1}`);
 }
 
+function sendPC(pc) {
+  const channel = (config.midiChannel || 1) - 1;
+  output.sendMessage([0xC0 + channel, pc]);
+  console.log(`Sent PC ${pc} on channel ${channel + 1}`);
+}
+
 // --- HUI setup (Pro Tools transport control) ---
 
 let huiOutput = null;
@@ -316,6 +322,8 @@ function dispatchCommand(match) {
     sendOSTransport(match.os);
   } else if (match.mmc) {
     sendMMCTransport(match.mmc);
+  } else if (match.pc !== undefined) {
+    sendPC(match.pc);
   } else {
     sendCC(match.cc, match.value);
   }
