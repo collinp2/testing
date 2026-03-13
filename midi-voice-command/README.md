@@ -421,3 +421,18 @@ Fix: stop cloudflared on the old Mac:
 launchctl unload ~/Library/LaunchAgents/com.yourname.cloudflared.plist
 ```
 Wait a few seconds for Cloudflare to clear the old connections, then retry.
+
+---
+
+## Future: Marshall JVM 410H Voice Control
+
+PC support is already implemented (see Managing Commands above). A future session will add JVM 410H commands to `config.json` so you can switch amp channels via Google Home.
+
+Example:
+```json
+"clean channel":  { "pc": 0 },
+"crunch channel": { "pc": 1 },
+"lead channel":   { "pc": 2 }
+```
+
+"Hey Google, activate lead channel" → PC 2 → JVM 410H switches to programmed lead preset.
