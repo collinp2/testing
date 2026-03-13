@@ -449,3 +449,46 @@ Example `config.json` commands once implemented:
 "Hey Google, activate lead channel" → PC 2 → JVM output → JVM 410H switches to programmed lead preset.
 
 > Note: you'll need a MIDI interface connected to the Mac with a 5-pin DIN cable running to the JVM's MIDI IN. The JVM does not have USB MIDI.
+
+---
+
+## Future: Midas M32R Console Control via OSC
+
+The M32R is always on the same network as the Mac running this server. OSC (Open Sound Control) over UDP gives much deeper control than MIDI — any fader, EQ, mute group, scene recall, etc.
+
+### Why OSC over MIDI for the M32R
+
+- Full bidirectional parameter control (faders, EQ, compression, gates, effects, aux sends)
+- Scene/snapshot recall
+- Mute group toggling
+- No extra hardware — M32R and Mac are already on the same network
+
+### Planned implementation
+
+**Dependencies:** add `node-osc` npm package — no other infrastructure needed.
+
+**Config additions:**
+```json
+{
+  "m32rHost": "192.168.1.XX",
+  "m32rPort": 10023
+}
+```
+
+**New `"osc"` command type in `config.json`:**
+```json
+"tracking setup": { "osc": "scene",     "value": 1 },
+"mix setup":      { "osc": "scene",     "value": 2 },
+"mute band":      { "osc": "mutegroup", "value": 1 }
+```
+
+**Code change:** add OSC dispatch alongside existing MIDI/HUI/MMC in `dispatchCommand`.
+
+### Before the session
+
+Look up the exact OSC address strings for the M32R (X32/M32 OSC protocol is well documented):
+- Scene recall address format
+- Mute group toggle address format
+- Any other commands needed
+
+Default M32R OSC port: **10023 UDP**
