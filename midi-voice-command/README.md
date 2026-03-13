@@ -428,11 +428,24 @@ Wait a few seconds for Cloudflare to clear the old connections, then retry.
 
 PC support is already implemented (see Managing Commands above). A future session will add JVM 410H commands to `config.json` so you can switch amp channels via Google Home.
 
-Example:
+### Multiple MIDI devices
+
+Currently all CC and PC messages go to the single `midiDevice` defined in `config.json` (the Kemper). The JVM needs to be a **separate MIDI output** since it's a different physical device.
+
+The multi-device pattern already exists in the code (`huiOutput`, `mmcOutput` are separate outputs alongside the main one). The required changes for a future session:
+
+1. Add `"jvmDevice": "your-jvm-midi-interface"` to `config.json`
+2. Open a second MIDI output for it at startup
+3. Add a `"device"` field to JVM commands in `config.json`
+4. Route commands with `"device": "jvm"` to the JVM output in `dispatchCommand`
+
+Example `config.json` commands once implemented:
 ```json
-"clean channel":  { "pc": 0 },
-"crunch channel": { "pc": 1 },
-"lead channel":   { "pc": 2 }
+"clean channel":  { "pc": 0, "device": "jvm" },
+"crunch channel": { "pc": 1, "device": "jvm" },
+"lead channel":   { "pc": 2, "device": "jvm" }
 ```
 
-"Hey Google, activate lead channel" → PC 2 → JVM 410H switches to programmed lead preset.
+"Hey Google, activate lead channel" → PC 2 → JVM output → JVM 410H switches to programmed lead preset.
+
+> Note: you'll need a MIDI interface connected to the Mac with a 5-pin DIN cable running to the JVM's MIDI IN. The JVM does not have USB MIDI.
