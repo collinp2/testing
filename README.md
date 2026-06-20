@@ -1,6 +1,6 @@
 # NECRONAM — Neural Amp Necromancy
 
-![NECRONAM editor](docs/screenshot.png)
+![NECRONAM](https://raw.githubusercontent.com/collinp2/cp_software/necronam/docs/screenshot.png)
 
 A horror-themed **Neural Amp Modeler (NAM) capture player** by CP Software,
 built with JUCE. It does everything the official NAM ("gateway") plugin does —
