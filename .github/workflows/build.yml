@@ -1,0 +1,93 @@
+name: Build NECRONAM
+
+on:
+  push:
+    tags:
+      - 'necronam-v*'
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: ver
+        shell: bash
+        run: |
+          ref="${GITHUB_REF_NAME}"
+          if [[ "$ref" == necronam-v* ]]; then v="${ref#necronam-v}"; else v="0.0.0-dev"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer (.exe)
+        shell: cmd
+        run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=${{ steps.ver.outputs.version }} packaging\windows\necronam.iss'
+
+      - name: Zip VST3 (manual-copy option)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path "build/NECRONAM_artefacts/Release/VST3/NECRONAM.vst3" -DestinationPath "dist/NECRONAM-${{ steps.ver.outputs.version }}-Windows-VST3.zip" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: ver
+        shell: bash
+        run: |
+          ref="${GITHUB_REF_NAME}"
+          if [[ "$ref" == necronam-v* ]]; then v="${ref#necronam-v}"; else v="0.0.0-dev"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare system plug-in folders
+        run: |
+          sudo mkdir -p "/Library/Audio/Plug-Ins/VST3" "/Library/Audio/Plug-Ins/Components"
+          sudo chown "$(whoami)" "/Library/Audio/Plug-Ins/VST3" "/Library/Audio/Plug-Ins/Components"
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Build installer (.pkg)
+        run: |
+          chmod +x packaging/macos/build_installer.sh
+          VERSION="${{ steps.ver.outputs.version }}" packaging/macos/build_installer.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*
+
+  release:
+    needs: [windows, macos]
+    if: startsWith(github.ref, 'refs/tags/necronam-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
