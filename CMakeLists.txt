@@ -9,13 +9,18 @@ if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_ARCHITECTURES)
 endif()
 
 # ============================================================================
-#  NECRONAM  —  Neural Amp Necromancy
-#  A Neural Amp Modeler (NAM) capture player with cab IR, API-560 style
-#  graphic EQ, hi/low-pass filters and the Flesh Render multiband saturator.
+#  NECRONAM MAX  —  Neural Amp Necromancy (feature-loaded edition)
+#  A two-amp NAM capture player: dual NAM models routed in series or parallel,
+#  a stereo dual-IR cab mixer, an API-560 style graphic EQ, hi/low-pass
+#  filters and the Flesh Render multiband saturator — all in a true-stereo
+#  signal path, with an on-disk preset browser.
+#
+#  This is a SEPARATE plugin from NECRONAM (distinct name / code / bundle id)
+#  so both can be installed and loaded side by side.
 #  CP Software. JUCE + NeuralAmpModelerCore.
 # ============================================================================
 
-project(NECRONAM VERSION 1.0.0 LANGUAGES C CXX)
+project(NECRONAM_MAX VERSION 1.0.0 LANGUAGES C CXX)
 
 # NAM core requires C++20; JUCE is happy with it too.
 set(CMAKE_CXX_STANDARD 20)
@@ -69,40 +74,40 @@ endif()
 # ----------------------------------------------------------------------------
 # Install system-wide on macOS (/Library) instead of the per-user folder.
 # Guarded so non-macOS builds keep the default (per-user) copy location.
-set(NECRONAM_COPY_ARGS COPY_PLUGIN_AFTER_BUILD TRUE)
+set(NMAX_COPY_ARGS COPY_PLUGIN_AFTER_BUILD TRUE)
 if(APPLE)
-    list(APPEND NECRONAM_COPY_ARGS
+    list(APPEND NMAX_COPY_ARGS
         VST3_COPY_DIR "/Library/Audio/Plug-Ins/VST3"
         AU_COPY_DIR   "/Library/Audio/Plug-Ins/Components")
 endif()
 
-juce_add_plugin(NECRONAM
-    PRODUCT_NAME              "NECRONAM"
+juce_add_plugin(NECRONAM_MAX
+    PRODUCT_NAME              "NECRONAM MAX"
     COMPANY_NAME             "CP Software"
-    BUNDLE_ID                "com.cpsoftware.necronam"
-    DESCRIPTION              "Neural Amp Necromancy — NAM player, IR, EQ & Saturation"
+    BUNDLE_ID                "com.cpsoftware.necronammax"
+    DESCRIPTION              "Neural Amp Necromancy MAX — dual-amp NAM player, stereo dual-IR cab, EQ & saturation"
     PLUGIN_MANUFACTURER_CODE  Cpsw
-    PLUGIN_CODE               Ncnm
+    PLUGIN_CODE               NcMx
     FORMATS                   VST3 AU Standalone
     IS_SYNTH                  FALSE
     NEEDS_MIDI_INPUT          FALSE
     NEEDS_MIDI_OUTPUT         FALSE
     IS_MIDI_EFFECT            FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
-    ${NECRONAM_COPY_ARGS}
+    ${NMAX_COPY_ARGS}
     VST3_CATEGORIES           "Fx" "Distortion"
     AU_MAIN_TYPE              "kAudioUnitType_Effect"
 )
 
-juce_generate_juce_header(NECRONAM)
+juce_generate_juce_header(NECRONAM_MAX)
 
 # Embedded assets (logo + body typefaces).
-juce_add_binary_data(NecronamAssets SOURCES
+juce_add_binary_data(NecronamMaxAssets SOURCES
     Resources/Anton-Regular.ttf
     Resources/IBMPlexMono-Regular.ttf
     Resources/IBMPlexMono-Bold.ttf)
 
-target_sources(NECRONAM PRIVATE
+target_sources(NECRONAM_MAX PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/HorrorLookAndFeel.cpp
@@ -110,7 +115,7 @@ target_sources(NECRONAM PRIVATE
 )
 
 # NAM core processes float buffers (matches JUCE).
-target_compile_definitions(NECRONAM PRIVATE
+target_compile_definitions(NECRONAM_MAX PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
@@ -119,17 +124,17 @@ target_compile_definitions(NECRONAM PRIVATE
 )
 
 # Include paths for NAM core + its vendored nlohmann/json and Eigen.
-target_include_directories(NECRONAM PRIVATE
+target_include_directories(NECRONAM_MAX PRIVATE
     "${NAM_DIR}"
     "${NAM_DEPS}"
     "${NAM_DEPS}/nlohmann"
 )
-target_include_directories(NECRONAM SYSTEM PRIVATE
+target_include_directories(NECRONAM_MAX SYSTEM PRIVATE
     "${NAM_DEPS}/eigen"
 )
 
-target_link_libraries(NECRONAM PRIVATE
-    NecronamAssets
+target_link_libraries(NECRONAM_MAX PRIVATE
+    NecronamMaxAssets
     juce::juce_audio_utils
     juce::juce_audio_processors
     juce::juce_dsp
