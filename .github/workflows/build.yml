@@ -1,9 +1,9 @@
-name: Build NECRONAM
+name: Build NECRONAM MAX
 
 on:
   push:
     tags:
-      - 'necronam-v*'
+      - 'necronam-max-v*'
   workflow_dispatch:
 
 jobs:
@@ -17,7 +17,7 @@ jobs:
         shell: bash
         run: |
           ref="${GITHUB_REF_NAME}"
-          if [[ "$ref" == necronam-v* ]]; then v="${ref#necronam-v}"; else v="0.0.0-dev"; fi
+          if [[ "$ref" == necronam-max-v* ]]; then v="${ref#necronam-max-v}"; else v="0.0.0-dev"; fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - name: Configure
@@ -31,13 +31,13 @@ jobs:
 
       - name: Build installer (.exe)
         shell: cmd
-        run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=${{ steps.ver.outputs.version }} packaging\windows\necronam.iss'
+        run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=${{ steps.ver.outputs.version }} packaging\windows\necronam-max.iss'
 
       - name: Zip VST3 (manual-copy option)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Compress-Archive -Path "build/NECRONAM_artefacts/Release/VST3/NECRONAM.vst3" -DestinationPath "dist/NECRONAM-${{ steps.ver.outputs.version }}-Windows-VST3.zip" -Force
+          Compress-Archive -Path "build/NECRONAM_MAX_artefacts/Release/VST3/NECRONAM MAX.vst3" -DestinationPath "dist/NECRONAM-MAX-${{ steps.ver.outputs.version }}-Windows-VST3.zip" -Force
 
       - uses: actions/upload-artifact@v4
         with:
@@ -54,7 +54,7 @@ jobs:
         shell: bash
         run: |
           ref="${GITHUB_REF_NAME}"
-          if [[ "$ref" == necronam-v* ]]; then v="${ref#necronam-v}"; else v="0.0.0-dev"; fi
+          if [[ "$ref" == necronam-max-v* ]]; then v="${ref#necronam-max-v}"; else v="0.0.0-dev"; fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - name: Prepare system plug-in folders
@@ -80,7 +80,7 @@ jobs:
 
   release:
     needs: [windows, macos]
-    if: startsWith(github.ref, 'refs/tags/necronam-v')
+    if: startsWith(github.ref, 'refs/tags/necronam-max-v')
     runs-on: ubuntu-latest
     permissions:
       contents: write

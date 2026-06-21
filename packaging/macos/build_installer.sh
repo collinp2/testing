@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  Build a self-contained macOS installer (.pkg) for NECRONAM.
+#  Build a self-contained macOS installer (.pkg) for NECRONAM MAX.
 #  Packages the VST3 + AU (and optionally the Standalone app) into a single
 #  double-clickable installer that drops them into the system plug-in folders.
 #
@@ -20,18 +20,18 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"            # the NECRONAM project dir
+ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"            # the NECRONAM MAX project dir
 
 VERSION="${VERSION:-1.0.0}"
 BUILD_DIR="${BUILD_DIR:-$ROOT/build}"
-ART="$BUILD_DIR/NECRONAM_artefacts/Release"
+ART="$BUILD_DIR/NECRONAM_MAX_artefacts/Release"
 OUT="$ROOT/dist"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
-VST3="$ART/VST3/NECRONAM.vst3"
-AU="$ART/AU/NECRONAM.component"
-APP="$ART/Standalone/NECRONAM.app"
+VST3="$ART/VST3/NECRONAM MAX.vst3"
+AU="$ART/AU/NECRONAM MAX.component"
+APP="$ART/Standalone/NECRONAM MAX.app"
 
 if [[ ! -d "$VST3" ]]; then
     echo "ERROR: $VST3 not found. Build first:" >&2
@@ -55,9 +55,9 @@ if [[ "${INCLUDE_STANDALONE:-0}" == "1" && -d "$APP" ]]; then
     cp -R "$APP" "$STAGE/Applications/"
 fi
 
-PKG="$OUT/NECRONAM-$VERSION-macOS.pkg"
+PKG="$OUT/NECRONAM-MAX-$VERSION-macOS.pkg"
 ARGS=(--root "$STAGE"
-      --identifier com.cpsoftware.necronam.pkg
+      --identifier com.cpsoftware.necronammax.pkg
       --version "$VERSION"
       --install-location /)
 if [[ -n "${INSTALLER_SIGN_ID:-}" ]]; then

@@ -1,11 +1,11 @@
-# NECRONAM — building installers
+# NECRONAM MAX — building installers
 
 Self-contained installers that drop the plugin into the system plug-in folders
 so it shows up in every host. Build the plugin in **Release** first, then run
-the installer script for your platform. Output lands in `NECRONAM/dist/`.
+the installer script for your platform. Output lands in `dist/`.
 
 ```bash
-# from the NECRONAM project dir, on both platforms:
+# from the project dir, on both platforms:
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
@@ -13,11 +13,27 @@ cmake --build build --config Release
 Installers are platform-native — a macOS `.pkg` needs Apple's `pkgbuild`, a
 Windows `.exe` needs Inno Setup — so each is built on its own OS.
 
+## CI / releases (GitHub Actions)
+
+`.github/workflows/build.yml` builds both installers and attaches them to a
+GitHub Release. Cut a release by pushing a tag of the form `necronam-max-v*`:
+
+```bash
+git tag necronam-max-v1.0.0
+git push origin necronam-max-v1.0.0
+```
+
+The workflow builds the Windows `.exe` + VST3 zip and the macOS `.pkg`, then the
+`release` job publishes them on the release for that tag. (It can also be run
+manually via **Run workflow** / `workflow_dispatch`, which builds the artefacts
+without publishing a release.) The tag prefix is distinct from the original
+NECRONAM (`necronam-v*`) so the two plugins' releases never collide.
+
 ## macOS — `.pkg`
 
 ```bash
 packaging/macos/build_installer.sh
-# → dist/NECRONAM-1.0.0-macOS.pkg
+# → dist/NECRONAM-MAX-1.0.0-macOS.pkg
 ```
 
 Installs:
@@ -43,9 +59,9 @@ both Apple Silicon and Intel.
 For public distribution, sign it (`INSTALLER_SIGN_ID=...`) and notarize:
 
 ```bash
-xcrun notarytool submit dist/NECRONAM-1.0.0-macOS.pkg \
+xcrun notarytool submit dist/NECRONAM-MAX-1.0.0-macOS.pkg \
     --apple-id you@example.com --team-id TEAMID --password APP_SPECIFIC_PW --wait
-xcrun stapler staple dist/NECRONAM-1.0.0-macOS.pkg
+xcrun stapler staple dist/NECRONAM-MAX-1.0.0-macOS.pkg
 ```
 
 ## Windows — `.exe`
@@ -54,16 +70,16 @@ Requires [Inno Setup 6](https://jrsoftware.org/isinfo.php).
 
 ```bat
 cd packaging\windows
-"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" necronam.iss
-:: → dist\NECRONAM-1.0.0-Windows.exe
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" necronam-max.iss
+:: → dist\NECRONAM-MAX-1.0.0-Windows.exe
 ```
 
 Installs:
 
 | Component | Destination |
 |-----------|-------------|
-| VST3      | `C:\Program Files\Common Files\VST3\NECRONAM.vst3` |
-| Standalone (optional) | `C:\Program Files\CP Software\NECRONAM\` + Start-menu shortcut |
+| VST3      | `C:\Program Files\Common Files\VST3\NECRONAM MAX.vst3` |
+| Standalone (optional) | `C:\Program Files\CP Software\NECRONAM MAX\` + Start-menu shortcut |
 
 Override the version with `/DMyAppVersion=1.2.3`. The installer requests admin
 elevation (writing to `Common Files`). For public distribution, sign the
