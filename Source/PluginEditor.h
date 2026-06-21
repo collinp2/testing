@@ -43,6 +43,7 @@ private:
 
     void chooseModel (int ampIndex);
     void chooseIR (int cabIndex);
+    void stepModel (int ampIndex, int dir);   // scroll .nam files in the model's folder
     void refreshPresetBox();
     void savePresetDialog();
 
@@ -60,8 +61,10 @@ private:
     int currentTab = TabAmp;
 
     // ---- Amp A / B model loaders (AMP tab) ----
-    juce::TextButton loadModelAButton { "Load Amp A" }, clearModelAButton { "X" };
-    juce::TextButton loadModelBButton { "Load Amp B" }, clearModelBButton { "X" };
+    juce::TextButton loadModelAButton { "Load A" }, clearModelAButton { "X" };
+    juce::TextButton loadModelBButton { "Load B" }, clearModelBButton { "X" };
+    juce::TextButton prevAButton { "<" }, nextAButton { ">" };
+    juce::TextButton prevBButton { "<" }, nextBButton { ">" };
     juce::Label      modelANameLabel  { {}, "(no model)" };
     juce::Label      modelBNameLabel  { {}, "(no model)" };
     juce::ComboBox   routingBox;

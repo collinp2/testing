@@ -142,7 +142,7 @@ APVTS::ParameterLayout NecronamAudioProcessor::createLayout()
     params.push_back (fParam (ParamID::ampSpread, "Amp Spread", Range (0.0f, 1.0f, 0.01f), 0.5f, pctToText));
 
     // ---- Dual cab IR mixer ----
-    params.push_back (bParam (ParamID::cabAActive, "Cab A", true));
+    params.push_back (bParam (ParamID::cabAActive, "Cab A", false));
     params.push_back (bParam (ParamID::cabBActive, "Cab B", false));
     params.push_back (fParam (ParamID::cabALevel, "Cab A Level", Range (-40.0f, 12.0f, 0.1f), 0.0f, dbToText));
     params.push_back (fParam (ParamID::cabBLevel, "Cab B Level", Range (-40.0f, 12.0f, 0.1f), 0.0f, dbToText));

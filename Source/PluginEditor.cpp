@@ -66,6 +66,17 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     loadModelBButton.onClick  = [this] { chooseModel (1); };
     clearModelBButton.onClick = [this] { processor.clearNamModel (1); };
 
+    // Scroll through the .nam files in the loaded model's folder (per amp).
+    for (auto* b : { &prevAButton, &nextAButton, &prevBButton, &nextBButton })
+    {
+        addAndMakeVisible (*b);
+        assignTab (*b, TabAmp);
+    }
+    prevAButton.onClick = [this] { stepModel (0, -1); };
+    nextAButton.onClick = [this] { stepModel (0,  1); };
+    prevBButton.onClick = [this] { stepModel (1, -1); };
+    nextBButton.onClick = [this] { stepModel (1,  1); };
+
     // ---- Cab A / B IR loaders (TONE tab) ----
     for (auto* b : { &loadIRAButton, &clearIRAButton, &loadIRBButton, &clearIRBButton })
     {
@@ -332,6 +343,34 @@ void NecronamAudioProcessorEditor::chooseIR (int cabIndex)
         const auto f = fc.getResult();
         if (f.existsAsFile()) processor.loadImpulseResponse (f, cabIndex);
     });
+}
+
+void NecronamAudioProcessorEditor::stepModel (int ampIndex, int dir)
+{
+    const int a = juce::jlimit (0, 1, ampIndex);
+    const auto cur = processor.apvts.state.getProperty (NecronamAudioProcessor::kNamPathKey[a]).toString();
+    const juce::File curFile (cur);
+    const juce::File folder = curFile.getParentDirectory();
+    if (! folder.isDirectory())
+        return;   // a model must be loaded first so we know which folder to scroll
+
+    auto files = folder.findChildFiles (juce::File::findFiles, false, "*.nam");
+    if (files.isEmpty())
+        return;
+
+    struct NameSort
+    {
+        int compareElements (const juce::File& x, const juce::File& y) const
+        {
+            return x.getFileName().compareNatural (y.getFileName());
+        }
+    } sorter;
+    files.sort (sorter);
+
+    int idx = files.indexOf (curFile);
+    if (idx < 0) idx = (dir > 0 ? -1 : 0);
+    idx = (idx + dir + files.size()) % files.size();
+    processor.loadNamModel (files[idx], a);
 }
 
 // ===========================================================================
@@ -685,30 +724,35 @@ void NecronamAudioProcessorEditor::resized()
 
     // ===== AMP tab =====
     {
+        // Top-to-bottom in signal order: front sat + front filters, then amps + I/O.
         auto a = bodyArea;
-        auto row1 = a.removeFromTop (280);
-        ampModelsArea = row1.removeFromLeft (580);
-        row1.removeFromLeft (14);
-        inputArea = row1;
+        auto rowTop = a.removeFromTop (170);
+        frontSatArea = rowTop.removeFromLeft (740);
+        rowTop.removeFromLeft (14);
+        frontFilterArea = rowTop;
         a.removeFromTop (12);
-        auto row2 = a.removeFromTop (170);
-        frontSatArea = row2.removeFromLeft (740);
-        row2.removeFromLeft (14);
-        frontFilterArea = row2;
+        auto rowBot = a.removeFromTop (280);
+        ampModelsArea = rowBot.removeFromLeft (580);
+        rowBot.removeFromLeft (14);
+        inputArea = rowBot;
 
         {
             auto m = ampModelsArea.reduced (14);
             m.removeFromTop (22);
             auto rowA = m.removeFromTop (26);
-            loadModelAButton.setBounds (rowA.removeFromLeft (130)); rowA.removeFromLeft (6);
-            clearModelAButton.setBounds (rowA.removeFromRight (24)); rowA.removeFromRight (6);
-            ampAToggle->setBounds (rowA.removeFromRight (44)); rowA.removeFromRight (6);
+            loadModelAButton.setBounds (rowA.removeFromLeft (100)); rowA.removeFromLeft (5);
+            prevAButton.setBounds (rowA.removeFromLeft (22)); rowA.removeFromLeft (2);
+            nextAButton.setBounds (rowA.removeFromLeft (22)); rowA.removeFromLeft (6);
+            clearModelAButton.setBounds (rowA.removeFromRight (24)); rowA.removeFromRight (5);
+            ampAToggle->setBounds (rowA.removeFromRight (40)); rowA.removeFromRight (5);
             modelANameLabel.setBounds (rowA);
             m.removeFromTop (6);
             auto rowB = m.removeFromTop (26);
-            loadModelBButton.setBounds (rowB.removeFromLeft (130)); rowB.removeFromLeft (6);
-            clearModelBButton.setBounds (rowB.removeFromRight (24)); rowB.removeFromRight (6);
-            ampBToggle->setBounds (rowB.removeFromRight (44)); rowB.removeFromRight (6);
+            loadModelBButton.setBounds (rowB.removeFromLeft (100)); rowB.removeFromLeft (5);
+            prevBButton.setBounds (rowB.removeFromLeft (22)); rowB.removeFromLeft (2);
+            nextBButton.setBounds (rowB.removeFromLeft (22)); rowB.removeFromLeft (6);
+            clearModelBButton.setBounds (rowB.removeFromRight (24)); rowB.removeFromRight (5);
+            ampBToggle->setBounds (rowB.removeFromRight (40)); rowB.removeFromRight (5);
             modelBNameLabel.setBounds (rowB);
             m.removeFromTop (8);
             auto routingRow = m.removeFromTop (26);
