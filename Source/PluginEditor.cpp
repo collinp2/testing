@@ -130,6 +130,14 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     addAndMakeVisible (masterFader);
     sliderAttachments.push_back (std::make_unique<SliderAttach> (processor.apvts, ID::outputLevel, masterFader));
 
+    // Clean DI blend knob (persistent — output section).
+    cleanKnob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+    cleanKnob.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f, juce::MathConstants<float>::pi * 2.75f, true);
+    cleanKnob.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 64, 14);
+    cleanKnob.setColour (juce::Slider::textBoxTextColourId, c (COL_BONE));
+    addAndMakeVisible (cleanKnob);
+    sliderAttachments.push_back (std::make_unique<SliderAttach> (processor.apvts, ID::cleanBlend, cleanKnob));
+
     // Level meters.
     inMeter.caption     = "IN";
     namOutMeter.caption = "OUT";
@@ -149,6 +157,8 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
 
     hpfKnob       = &addKnob (TabTone, ID::hpfFreq, "HI-PASS");
     lpfKnob       = &addKnob (TabTone, ID::lpfFreq, "LOW-PASS");
+    frontHpfKnob  = &addKnob (TabAmp,  ID::frontHpfFreq, "HI-PASS");
+    frontLpfKnob  = &addKnob (TabAmp,  ID::frontLpfFreq, "LOW-PASS");
     cabALevelKnob = &addHSlider (TabTone, ID::cabALevel);
     cabBLevelKnob = &addHSlider (TabTone, ID::cabBLevel);
 
@@ -162,6 +172,10 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     // ---- Toggles ----
     gateToggle     = &addToggle (TabAmp,   ID::gateActive,     "Gate");
     frontSatToggle = &addToggle (TabAmp,   ID::frontSatActive, "Front Sat On");
+    ampAToggle     = &addToggle (TabAmp,   ID::ampAActive,     "On");
+    ampBToggle     = &addToggle (TabAmp,   ID::ampBActive,     "On");
+    frontHpfToggle = &addToggle (TabAmp,   ID::frontHpfActive, "On");
+    frontLpfToggle = &addToggle (TabAmp,   ID::frontLpfActive, "On");
     cabAToggle     = &addToggle (TabTone,  ID::cabAActive,     "A On");
     cabBToggle     = &addToggle (TabTone,  ID::cabBActive,     "B On");
     eqToggle       = &addToggle (TabTone,  ID::eqActive,       "EQ On");
@@ -401,7 +415,8 @@ void NecronamAudioProcessorEditor::timerCallback()
         for (juce::Component* comp : { (juce::Component*) ampBLevelKnob,
                                        (juce::Component*) &loadModelBButton,
                                        (juce::Component*) &clearModelBButton,
-                                       (juce::Component*) &modelBNameLabel })
+                                       (juce::Component*) &modelBNameLabel,
+                                       (juce::Component*) ampBToggle })
         {
             comp->setEnabled (bUsed);
             comp->setAlpha (bUsed ? 1.0f : 0.5f);
@@ -502,16 +517,22 @@ void NecronamAudioProcessorEditor::paint (juce::Graphics& g)
         auto lbl = juce::Rectangle<int> (masterArea.getX() + 10, masterArea.getBottom() - 10 - 24 - 13,
                                          masterArea.getWidth() - 20, 12);
         g.drawText ("OUTPUT MODE", lbl, juce::Justification::centred);
+
+        const auto ck = cleanKnob.getBounds();
+        if (! ck.isEmpty())
+            g.drawText ("CLEAN BLEND", juce::Rectangle<int> (masterArea.getX() + 4, ck.getY() - 13,
+                                                             masterArea.getWidth() - 8, 12), juce::Justification::centred);
     }
 
     // Current-tab panels.
     if (currentTab == TabAmp)
     {
-        for (auto* r : { &ampModelsArea, &inputArea, &frontSatArea })
+        for (auto* r : { &ampModelsArea, &inputArea, &frontSatArea, &frontFilterArea })
             HorrorLookAndFeel::drawPanelBackground (g, r->toFloat());
-        title (ampModelsArea, "AMPS / MODELS");
-        title (inputArea,     "INPUT / OUTPUT");
-        title (frontSatArea,  "FRONT SATURATION  -  FLESH RENDER (PRE-AMP)");
+        title (ampModelsArea,   "AMPS / MODELS");
+        title (inputArea,       "INPUT / OUTPUT");
+        title (frontSatArea,    "FRONT SATURATION  -  FLESH RENDER (PRE-AMP)");
+        title (frontFilterArea, "FRONT FILTERS");
         drawSatBands (frontSatArea);
 
         // Routing caption.
@@ -634,8 +655,11 @@ void NecronamAudioProcessorEditor::resized()
         auto m = masterArea.reduced (10);
         m.removeFromTop (20);
         outputModeBox.setBounds (m.removeFromBottom (24));
-        m.removeFromBottom (14);
-        m.removeFromBottom (8);
+        m.removeFromBottom (14);              // OUTPUT MODE caption
+        m.removeFromBottom (10);
+        auto cleanArea = m.removeFromBottom (74);
+        cleanKnob.setBounds (cleanArea.reduced (10, 0).removeFromBottom (66));
+        m.removeFromBottom (14);              // CLEAN BLEND caption (painted)
         masterMeter.setBounds (m.removeFromLeft (28));
         m.removeFromLeft (8);
         masterFader.setBounds (m);
@@ -667,19 +691,24 @@ void NecronamAudioProcessorEditor::resized()
         row1.removeFromLeft (14);
         inputArea = row1;
         a.removeFromTop (12);
-        frontSatArea = a.removeFromTop (170);
+        auto row2 = a.removeFromTop (170);
+        frontSatArea = row2.removeFromLeft (740);
+        row2.removeFromLeft (14);
+        frontFilterArea = row2;
 
         {
             auto m = ampModelsArea.reduced (14);
             m.removeFromTop (22);
             auto rowA = m.removeFromTop (26);
-            loadModelAButton.setBounds (rowA.removeFromLeft (140)); rowA.removeFromLeft (6);
-            clearModelAButton.setBounds (rowA.removeFromRight (26)); rowA.removeFromRight (6);
+            loadModelAButton.setBounds (rowA.removeFromLeft (130)); rowA.removeFromLeft (6);
+            clearModelAButton.setBounds (rowA.removeFromRight (24)); rowA.removeFromRight (6);
+            ampAToggle->setBounds (rowA.removeFromRight (44)); rowA.removeFromRight (6);
             modelANameLabel.setBounds (rowA);
             m.removeFromTop (6);
             auto rowB = m.removeFromTop (26);
-            loadModelBButton.setBounds (rowB.removeFromLeft (140)); rowB.removeFromLeft (6);
-            clearModelBButton.setBounds (rowB.removeFromRight (26)); rowB.removeFromRight (6);
+            loadModelBButton.setBounds (rowB.removeFromLeft (130)); rowB.removeFromLeft (6);
+            clearModelBButton.setBounds (rowB.removeFromRight (24)); rowB.removeFromRight (6);
+            ampBToggle->setBounds (rowB.removeFromRight (44)); rowB.removeFromRight (6);
             modelBNameLabel.setBounds (rowB);
             m.removeFromTop (8);
             auto routingRow = m.removeFromTop (26);
@@ -715,6 +744,20 @@ void NecronamAudioProcessorEditor::resized()
             gateToggle->setBounds (ip.removeFromTop (26).removeFromLeft (100));
         }
         layoutSat (frontSatArea, frontSatKnobs, *frontSatToggle);
+
+        {
+            auto fa = frontFilterArea.reduced (14);
+            fa.removeFromTop (22);
+            const int half = fa.getWidth() / 2;
+            auto left = fa.removeFromLeft (half);
+            auto right = fa;
+            left.removeFromTop (18);
+            frontHpfKnob->setBounds (left.removeFromTop (84).reduced (20, 2));
+            frontHpfToggle->setBounds (left.removeFromTop (24).reduced (22, 2));
+            right.removeFromTop (18);
+            frontLpfKnob->setBounds (right.removeFromTop (84).reduced (20, 2));
+            frontLpfToggle->setBounds (right.removeFromTop (24).reduced (22, 2));
+        }
     }
 
     // ===== TONE tab =====

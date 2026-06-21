@@ -204,6 +204,19 @@ APVTS::ParameterLayout NecronamAudioProcessor::createLayout()
         juce::ParameterID { ParamID::fxOrder, 1 }, "FX Order",
         juce::StringArray { "Delay -> Reverb", "Reverb -> Delay" }, 0));
 
+    // ---- Front filter section (between front saturation and the amps) ----
+    params.push_back (fParam (ParamID::frontHpfFreq, "Front Hi-Pass", Range (20.0f, 2000.0f, 1.0f, 0.3f), 20.0f, hzToText));
+    params.push_back (bParam (ParamID::frontHpfActive, "Front Hi-Pass On", false));
+    params.push_back (fParam (ParamID::frontLpfFreq, "Front Low-Pass", Range (1000.0f, 20000.0f, 1.0f, 0.3f), 20000.0f, hzToText));
+    params.push_back (bParam (ParamID::frontLpfActive, "Front Low-Pass On", false));
+
+    // ---- Per-amp bypass ----
+    params.push_back (bParam (ParamID::ampAActive, "Amp A", true));
+    params.push_back (bParam (ParamID::ampBActive, "Amp B", true));
+
+    // ---- Clean DI blend (output) ----
+    params.push_back (fParam (ParamID::cleanBlend, "Clean Blend", Range (0.0f, 1.0f, 0.001f), 0.0f, pctToText));
+
     return { params.begin(), params.end() };
 }
 
@@ -219,6 +232,7 @@ void NecronamAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     mBus.setSize        (2, samplesPerBlock);
     mCabScratch.setSize (2, samplesPerBlock);
     mCabSum.setSize     (2, samplesPerBlock);
+    mCleanDI.setSize    (1, samplesPerBlock);
 
     juce::dsp::ProcessSpec monoSpec   { sampleRate, (juce::uint32) samplesPerBlock, 1 };
     juce::dsp::ProcessSpec stereoSpec { sampleRate, (juce::uint32) samplesPerBlock, 2 };
@@ -244,6 +258,11 @@ void NecronamAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     mDelay.prepare (stereoSpec);
     mDelay.reset();
     mFrontSatWasActive = mDelayWasActive = mReverbWasActive = false;
+
+    // Front filter section (mono).
+    mFrontHPF.prepare (monoSpec);
+    mFrontLPF.prepare (monoSpec);
+    mFrontHpfCachedFreq = mFrontLpfCachedFreq = -1.0f;
 
     // Tuner capture ring.
     mTunerRing.fill (0.0f);
@@ -337,6 +356,14 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     const int numIn      = getTotalNumInputChannels();
     const int numOut     = getTotalNumOutputChannels();
 
+    auto processMono = [numSamples] (juce::dsp::IIR::Filter<float>& f, float* data)
+    {
+        float* ch[1] = { data };
+        juce::dsp::AudioBlock<float> block (ch, 1, (size_t) numSamples);
+        juce::dsp::ProcessContextReplacing<float> ctx (block);
+        f.process (ctx);
+    };
+
     // ---- Hot-swap staged models; honour clear requests (per amp) ----
     for (int a = 0; a < 2; ++a)
     {
@@ -393,6 +420,9 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         return;
     }
 
+    // ---- Clean DI capture (post input gain, pre-everything) for the output blend ----
+    juce::FloatVectorOperations::copy (mCleanDI.getWritePointer (0), mono, numSamples);
+
     // ---- Noise gate (simple downward gate on the pre-amp signal) ----
     if (apvts.getRawParameterValue (ParamID::gateActive)->load() > 0.5f)
     {
@@ -434,6 +464,28 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         mFrontSatWasActive = on;
     }
 
+    // ---- Front filters (mono) — between the front saturator and the amps ----
+    if (apvts.getRawParameterValue (ParamID::frontHpfActive)->load() > 0.5f)
+    {
+        const float f = apvts.getRawParameterValue (ParamID::frontHpfFreq)->load();
+        if (std::abs (f - mFrontHpfCachedFreq) > 0.5f)
+        {
+            mFrontHpfCachedFreq = f;
+            *mFrontHPF.coefficients = *juce::dsp::IIR::Coefficients<float>::makeHighPass (mSampleRate, f);
+        }
+        processMono (mFrontHPF, mono);
+    }
+    if (apvts.getRawParameterValue (ParamID::frontLpfActive)->load() > 0.5f)
+    {
+        const float f = apvts.getRawParameterValue (ParamID::frontLpfFreq)->load();
+        if (std::abs (f - mFrontLpfCachedFreq) > 0.5f)
+        {
+            mFrontLpfCachedFreq = f;
+            *mFrontLPF.coefficients = *juce::dsp::IIR::Coefficients<float>::makeLowPass (mSampleRate, f);
+        }
+        processMono (mFrontLPF, mono);
+    }
+
     // ---- DUAL AMP STAGE -> stereo bus (mBus ch0 = L, ch1 = R) ----
     const auto  routing = (Routing) (int) apvts.getRawParameterValue (ParamID::ampRouting)->load();
     const float levelA  = juce::Decibels::decibelsToGain (apvts.getRawParameterValue (ParamID::ampALevel)->load());
@@ -452,37 +504,77 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         else if (out != in)        juce::FloatVectorOperations::copy (out, in, numSamples);
     };
 
+    const bool aActive = apvts.getRawParameterValue (ParamID::ampAActive)->load() > 0.5f;
+    const bool bActive = apvts.getRawParameterValue (ParamID::ampBActive)->load() > 0.5f;
+
     if (routing == Routing::Single)
     {
-        runAmp (mAmp[0], mono, aOut);
-        juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);
-        juce::FloatVectorOperations::copy (busL, aOut, numSamples);
-        juce::FloatVectorOperations::copy (busR, aOut, numSamples);
+        if (aActive)
+        {
+            runAmp (mAmp[0], mono, aOut);
+            juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);
+            juce::FloatVectorOperations::copy (busL, aOut, numSamples);
+            juce::FloatVectorOperations::copy (busR, aOut, numSamples);
+        }
+        else   // amp bypassed -> dry
+        {
+            juce::FloatVectorOperations::copy (busL, mono, numSamples);
+            juce::FloatVectorOperations::copy (busR, mono, numSamples);
+        }
     }
     else if (routing == Routing::Series)
     {
-        runAmp (mAmp[0], mono, aOut);
-        juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);  // drive into Amp B
-        runAmp (mAmp[1], aOut, bOut);
-        juce::FloatVectorOperations::multiply (bOut, levelB, numSamples);
-        juce::FloatVectorOperations::copy (busL, bOut, numSamples);
-        juce::FloatVectorOperations::copy (busR, bOut, numSamples);
+        // A bypassed -> input passes straight to B; B bypassed -> A feeds the bus.
+        float* sig = mono;
+        if (aActive)
+        {
+            runAmp (mAmp[0], sig, aOut);
+            juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);  // drive into Amp B
+            sig = aOut;
+        }
+        if (bActive)
+        {
+            runAmp (mAmp[1], sig, bOut);
+            juce::FloatVectorOperations::multiply (bOut, levelB, numSamples);
+            sig = bOut;
+        }
+        juce::FloatVectorOperations::copy (busL, sig, numSamples);
+        juce::FloatVectorOperations::copy (busR, sig, numSamples);
     }
     else // Parallel
     {
-        runAmp (mAmp[0], mono, aOut);
-        runAmp (mAmp[1], mono, bOut);
-        juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);
-        juce::FloatVectorOperations::multiply (bOut, levelB, numSamples);
-
-        const float spread = apvts.getRawParameterValue (ParamID::ampSpread)->load();
-        float gAL, gAR, gBL, gBR;
-        equalPowerPan (-spread, gAL, gAR);   // Amp A toward the left
-        equalPowerPan ( spread, gBL, gBR);   // Amp B toward the right
-        for (int i = 0; i < numSamples; ++i)
+        if (aActive && bActive)
         {
-            busL[i] = aOut[i] * gAL + bOut[i] * gBL;
-            busR[i] = aOut[i] * gAR + bOut[i] * gBR;
+            runAmp (mAmp[0], mono, aOut);
+            runAmp (mAmp[1], mono, bOut);
+            juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);
+            juce::FloatVectorOperations::multiply (bOut, levelB, numSamples);
+
+            const float spread = apvts.getRawParameterValue (ParamID::ampSpread)->load();
+            float gAL, gAR, gBL, gBR;
+            equalPowerPan (-spread, gAL, gAR);   // Amp A toward the left
+            equalPowerPan ( spread, gBL, gBR);   // Amp B toward the right
+            for (int i = 0; i < numSamples; ++i)
+            {
+                busL[i] = aOut[i] * gAL + bOut[i] * gBL;
+                busR[i] = aOut[i] * gAR + bOut[i] * gBR;
+            }
+        }
+        else if (aActive || bActive)
+        {
+            // One amp bypassed -> the survivor plays centred.
+            const int   ai  = aActive ? 0 : 1;
+            float*      out = aActive ? aOut : bOut;
+            const float lvl = aActive ? levelA : levelB;
+            runAmp (mAmp[ai], mono, out);
+            juce::FloatVectorOperations::multiply (out, lvl, numSamples);
+            juce::FloatVectorOperations::copy (busL, out, numSamples);
+            juce::FloatVectorOperations::copy (busR, out, numSamples);
+        }
+        else   // both bypassed -> dry
+        {
+            juce::FloatVectorOperations::copy (busL, mono, numSamples);
+            juce::FloatVectorOperations::copy (busR, mono, numSamples);
         }
     }
 
@@ -533,14 +625,6 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
     // ---- Per-channel stereo post chain ----
     float* busCh[2] = { busL, busR };
-
-    auto processMono = [numSamples] (juce::dsp::IIR::Filter<float>& f, float* data)
-    {
-        float* ch[1] = { data };
-        juce::dsp::AudioBlock<float> block (ch, 1, (size_t) numSamples);
-        juce::dsp::ProcessContextReplacing<float> ctx (block);
-        f.process (ctx);
-    };
 
     // DC blocker (~10 Hz, always).
     for (int ch = 0; ch < 2; ++ch)
@@ -671,6 +755,22 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
         if (order == 0) { runDelay(); runReverb(); }
         else            { runReverb(); runDelay(); }
+    }
+
+    // ---- Clean DI blend (equal-power crossfade with the processed signal) ----
+    {
+        const float cb = apvts.getRawParameterValue (ParamID::cleanBlend)->load();
+        if (cb > 1.0e-4f)
+        {
+            const float wetG = std::cos (cb * 0.5f * juce::MathConstants<float>::pi);
+            const float clnG = std::sin (cb * 0.5f * juce::MathConstants<float>::pi);
+            const float* di = mCleanDI.getReadPointer (0);
+            for (int i = 0; i < numSamples; ++i)
+            {
+                busL[i] = busL[i] * wetG + di[i] * clnG;
+                busR[i] = busR[i] * wetG + di[i] * clnG;
+            }
+        }
     }
 
     // ---- Master output gain / mode ----

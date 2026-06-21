@@ -142,6 +142,19 @@ public:
 
         // FX order: 0 = Delay -> Reverb, 1 = Reverb -> Delay.
         static constexpr auto fxOrder       = "fx_order";
+
+        // Front filter section (mono, between front saturation and the amps).
+        static constexpr auto frontHpfFreq   = "front_hpf_freq";
+        static constexpr auto frontHpfActive = "front_hpf_active";
+        static constexpr auto frontLpfFreq   = "front_lpf_freq";
+        static constexpr auto frontLpfActive = "front_lpf_active";
+
+        // Per-amp bypass.
+        static constexpr auto ampAActive = "amp_a_active";
+        static constexpr auto ampBActive = "amp_b_active";
+
+        // Clean DI blend at the output.
+        static constexpr auto cleanBlend = "clean_blend";
     };
 
     enum class Routing { Single = 0, Series = 1, Parallel = 2 };
@@ -218,6 +231,11 @@ private:
     float mHpfCachedFreq = -1.0f;
     float mLpfCachedFreq = -1.0f;
 
+    // ----- Front filter section (mono, between front saturation and amps) ----
+    juce::dsp::IIR::Filter<float> mFrontHPF, mFrontLPF;
+    float mFrontHpfCachedFreq = -1.0f;
+    float mFrontLpfCachedFreq = -1.0f;
+
     // ----- Front saturation (mono, immediately before the dual amps) ---------
     Saturation mFrontSat;
 
@@ -247,6 +265,7 @@ private:
     juce::AudioBuffer<float> mBus;        // stereo bus (cab + post chain)
     juce::AudioBuffer<float> mCabScratch; // per-cab convolution scratch (stereo)
     juce::AudioBuffer<float> mCabSum;     // cab mix accumulator (stereo)
+    juce::AudioBuffer<float> mCleanDI;    // clean DI (mono) for the output blend
 
     // Meter accumulators (peak, linear), reset when the editor reads them.
     std::atomic<float> mInPeak     { 0.0f };

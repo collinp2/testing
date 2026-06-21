@@ -21,7 +21,8 @@ organised into **AMP / TONE / FX / TUNER** tabs.
 ```
 sum-to-mono input → input gain → noise gate
   → FRONT multiband saturation  (Flesh Render, mono — immediately before the amps)
-  → DUAL AMP STAGE (two NAM models) → stereo bus
+  → FRONT filters               (mono hi-pass / low-pass)
+  → DUAL AMP STAGE (two NAM models, each individually bypassable) → stereo bus
         Single   : Amp A only                            (centred)
         Series   : Amp A → Amp B  (Amp A level = drive into B)   (centred)
         Parallel : Amp A + Amp B, spread L↔R             (true stereo)
@@ -33,6 +34,7 @@ sum-to-mono input → input gain → noise gate
   → hi-pass filter
   → low-pass filter
   → DELAY + REVERB               (order-switchable; each fully true-bypassed)
+  → clean DI blend               (equal-power crossfade with the dry input)
   → output (Raw / Normalized / Calibrated)
 
 TUNER: taps the dry input pre-amp; engaging it mutes the output and drives a
@@ -58,6 +60,10 @@ routing:
   blend), 100% = Amp A hard-left / Amp B hard-right (full stereo). Equal-power
   pan law.
 
+Each amp has its own **On** switch: in Series a bypassed amp passes straight
+through to the next; in Parallel it drops out and the remaining amp re-centres —
+so you can A/B the two models, or run just one.
+
 *Amp A/B Level* trim and balance the two captures. The **Quality** (A2) control
 is shared and applies to both models (see below).
 
@@ -81,6 +87,20 @@ saturation → distortion → fuzz) appears **twice**, identical circuits:
 Each has its own on/off and full low/mid/high × sat/dist/fuzz controls, and is
 **true-bypassed** (skipped and reset while off). Front saturation lives on the
 **AMP** tab; output saturation on the **TONE** tab.
+
+## Front filters
+
+A second hi-pass / low-pass pair sits **between the front saturator and the
+amps** (mono, on the AMP tab) — for tightening the low end going into a high-gain
+model, or shaving fizz before the amp.
+
+## Clean blend
+
+The master strip's **Clean Blend** knob crossfades (equal-power) between the
+fully processed output and the **clean DI** (tapped right after input gain,
+bypassing the whole chain) — especially useful on bass to keep the low end solid
+under a distorted amp. Calibration assumes the processed signal, so prefer Raw
+output mode when blending heavily.
 
 ## Delay & reverb
 

@@ -78,6 +78,7 @@ private:
     std::unique_ptr<ComboAttach> outputModeAttach;
     juce::Slider     qualitySlider;   // AMP tab
     juce::Slider     masterFader;     // persistent
+    juce::Slider     cleanKnob;       // persistent — clean DI blend (output section)
     LevelMeter       inMeter, namOutMeter, masterMeter;
 
     // ---- FX order (FX tab) ----
@@ -106,6 +107,8 @@ private:
     juce::Slider* ampBLevelKnob = nullptr;
     juce::Slider* hpfKnob = nullptr;
     juce::Slider* lpfKnob = nullptr;
+    juce::Slider* frontHpfKnob = nullptr;
+    juce::Slider* frontLpfKnob = nullptr;
     juce::Slider* cabALevelKnob = nullptr;
     juce::Slider* cabBLevelKnob = nullptr;
     juce::Slider* delayTimeKnob = nullptr;
@@ -116,6 +119,10 @@ private:
     juce::Slider* reverbMixKnob = nullptr;
     juce::TextButton* gateToggle = nullptr;
     juce::TextButton* frontSatToggle = nullptr;
+    juce::TextButton* ampAToggle = nullptr;
+    juce::TextButton* ampBToggle = nullptr;
+    juce::TextButton* frontHpfToggle = nullptr;
+    juce::TextButton* frontLpfToggle = nullptr;
     juce::TextButton* cabAToggle = nullptr;
     juce::TextButton* cabBToggle = nullptr;
     juce::TextButton* eqToggle = nullptr;
@@ -131,7 +138,7 @@ private:
 
     // Section rectangles (filled in resized(), painted in paint()).
     juce::Rectangle<int> presetArea, tabBarArea, masterArea, bodyArea, qualityLabelArea;
-    juce::Rectangle<int> ampModelsArea, inputArea, frontSatArea;     // AMP tab
+    juce::Rectangle<int> ampModelsArea, inputArea, frontSatArea, frontFilterArea;   // AMP tab
     juce::Rectangle<int> cabArea, filterArea, eqArea, postSatArea;   // TONE tab
     juce::Rectangle<int> delayArea, reverbArea, fxOrderArea;         // FX tab
     juce::Rectangle<int> tunerArea;                                  // TUNER tab
