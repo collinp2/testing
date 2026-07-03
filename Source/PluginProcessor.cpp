@@ -18,9 +18,7 @@ namespace
 {
     // NAM architectures self-register via anonymous static objects, which get
     // dead-stripped when the core is linked through JUCE's SharedCode static
-    // library. Register them explicitly (also references the symbols so their
-    // translation units aren't dropped). Without this, get_dsp() throws and
-    // the model never loads.
+    // library. Register them explicitly.
     void ensureNamArchitecturesRegistered()
     {
         static const bool done = []
@@ -54,12 +52,10 @@ namespace
         while (v > cur && ! dst.compare_exchange_weak (cur, v, std::memory_order_relaxed)) {}
     }
 
-    // Equal-power pan. pan in [-1, +1]: -1 = hard left, 0 = centre (-3 dB both
-    // sides), +1 = hard right.
     void equalPowerPan (float pan, float& gainL, float& gainR) noexcept
     {
         pan = juce::jlimit (-1.0f, 1.0f, pan);
-        const float t = (pan + 1.0f) * 0.25f * juce::MathConstants<float>::pi; // 0..pi/2
+        const float t = (pan + 1.0f) * 0.25f * juce::MathConstants<float>::pi;
         gainL = std::cos (t);
         gainR = std::sin (t);
     }
@@ -80,16 +76,16 @@ NecronamAudioProcessor::NecronamAudioProcessor()
         .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "PARAMETERS", createLayout())
 {
-    // Watch the A2 quality control and the amp routing so we can apply them off
-    // the audio thread (SetSlimmableSize / setLatencySamples are not RT-safe).
     apvts.addParameterListener (ParamID::quality,    this);
     apvts.addParameterListener (ParamID::ampRouting, this);
+    apvts.addParameterListener (ParamID::inputMode,  this);
 }
 
 NecronamAudioProcessor::~NecronamAudioProcessor()
 {
     apvts.removeParameterListener (ParamID::quality,    this);
     apvts.removeParameterListener (ParamID::ampRouting, this);
+    apvts.removeParameterListener (ParamID::inputMode,  this);
     cancelPendingUpdate();
 }
 
@@ -110,21 +106,28 @@ APVTS::ParameterLayout NecronamAudioProcessor::createLayout()
     {
         return std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id, 1 }, name, def);
     };
+    auto cParam = [] (const juce::String& id, const juce::String& name,
+                      const juce::StringArray& items, int def)
+    {
+        return std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id, 1 }, name, items, def);
+    };
 
-    // ---- Levels / IO ----
+    // ---- Master / IO ----
     params.push_back (fParam (ParamID::inputLevel,  "Input Level",  Range (-20.0f, 20.0f, 0.1f), 0.0f, dbToText));
     params.push_back (fParam (ParamID::namOutput,   "Amp Output",   Range (-40.0f, 40.0f, 0.1f), 0.0f, dbToText));
     params.push_back (fParam (ParamID::outputLevel, "Output Level", Range (-40.0f, 40.0f, 0.1f), 0.0f, dbToText));
-    params.push_back (std::make_unique<juce::AudioParameterChoice> (
-        juce::ParameterID { ParamID::outputMode, 1 }, "Output Mode",
-        juce::StringArray { "Raw", "Normalized", "Calibrated" }, 0));
+    params.push_back (cParam (ParamID::outputMode, "Output Mode", { "Raw", "Normalized", "Calibrated" }, 0));
     params.push_back (fParam (ParamID::inputCal, "Input Calibration", Range (0.0f, 30.0f, 0.1f), 12.0f,
                               [] (float v, int) { return juce::String (v, 1) + " dBu"; }));
+    params.push_back (fParam (ParamID::cleanBlend, "Clean Blend", Range (0.0f, 1.0f, 0.001f), 0.0f, pctToText));
+    params.push_back (cParam (ParamID::inputMode, "Input Mode", { "Mono", "Stereo (Dual Mono)" }, 0));
+
+    // ---- Gate ----
     params.push_back (fParam (ParamID::gateThresh, "Gate Threshold", Range (-100.0f, 0.0f, 0.5f), -80.0f, dbToText));
     params.push_back (bParam (ParamID::gateActive, "Gate", false));
+    params.push_back (cParam (ParamID::gatePosition, "Gate Position", { "Pre Amp", "Post Amp" }, 0));
 
-    // A2 quality / efficiency. 0 = max efficiency (lite), 1 = max quality (full).
-    // Shared across both amps; only affects A2 "slimmable" models.
+    // ---- Quality (A2, shared) ----
     params.push_back (fParam (ParamID::quality, "Quality", Range (0.0f, 1.0f, 0.01f), 1.0f,
                               [] (float v, int)
                               {
@@ -133,27 +136,65 @@ APVTS::ParameterLayout NecronamAudioProcessor::createLayout()
                                   return juce::String (juce::roundToInt (v * 100.0f)) + "%";
                               }));
 
+    // ---- Flesh Render stage params (front fs_* + post) ----
+    const char* bands[3]    = { "low", "mid", "high" };
+    const char* bandsUp[3]  = { "Low", "Mid", "High" };
+    const char* stages[3]   = { "sat", "dist", "fuzz" };
+    const char* stagesUp[3] = { "Saturation", "Drive", "Fuzz" };
+
+    params.push_back (bParam (ParamID::frontSatActive, "Front Saturation", false));
+    params.push_back (fParam (ParamID::frontSatXLow,  "Front Xover Low",  Range (60.0f, 800.0f, 1.0f, 0.4f), 250.0f, hzToText));
+    params.push_back (fParam (ParamID::frontSatXHigh, "Front Xover High", Range (800.0f, 8000.0f, 1.0f, 0.4f), 2000.0f, hzToText));
+    for (int b = 0; b < 3; ++b)
+        for (int s = 0; s < 3; ++s)
+            params.push_back (fParam (satParamID (true, bands[b], stages[s]),
+                                      "Front " + juce::String (bandsUp[b]) + " " + stagesUp[s],
+                                      Range (0.0f, 1.0f, 0.001f), 0.0f, pctToText));
+
+    params.push_back (bParam (ParamID::satActive, "Saturation", false));
+    params.push_back (fParam (ParamID::satXLow,  "Xover Low",  Range (60.0f, 800.0f, 1.0f, 0.4f), 250.0f, hzToText));
+    params.push_back (fParam (ParamID::satXHigh, "Xover High", Range (800.0f, 8000.0f, 1.0f, 0.4f), 2000.0f, hzToText));
+    for (int b = 0; b < 3; ++b)
+        for (int s = 0; s < 3; ++s)
+            params.push_back (fParam (satParamID (false, bands[b], stages[s]),
+                                      juce::String (bandsUp[b]) + " " + stagesUp[s],
+                                      Range (0.0f, 1.0f, 0.001f), 0.0f, pctToText));
+
+    // ---- Drive section ----
+    params.push_back (bParam (ParamID::driveActive, "Drive", false));
+    params.push_back (cParam (ParamID::driveCircuit, "Drive Circuit", { "TC Preamp", "Tube Screamer" }, 0));
+    params.push_back (fParam (ParamID::tcGain,   "TC Gain",   Range (0.0f, 1.0f, 0.001f), 0.2f, pctToText));
+    params.push_back (fParam (ParamID::tcBass,   "TC Bass",   Range (-12.0f, 12.0f, 0.1f), 0.0f, dbToText));
+    params.push_back (fParam (ParamID::tcMid,    "TC Mid",    Range (-12.0f, 12.0f, 0.1f), 0.0f, dbToText));
+    params.push_back (fParam (ParamID::tcTreble, "TC Treble", Range (-12.0f, 12.0f, 0.1f), 0.0f, dbToText));
+    params.push_back (fParam (ParamID::tcLevel,  "TC Level",  Range (-12.0f, 12.0f, 0.1f), 0.0f, dbToText));
+    params.push_back (fParam (ParamID::tsDrive,  "TS Drive",  Range (0.0f, 1.0f, 0.001f), 0.3f, pctToText));
+    params.push_back (fParam (ParamID::tsTone,   "TS Tone",   Range (0.0f, 1.0f, 0.001f), 0.5f, pctToText));
+    params.push_back (fParam (ParamID::tsLevel,  "TS Level",  Range (-12.0f, 12.0f, 0.1f), 0.0f, dbToText));
+
+    // ---- Low cut ----
+    params.push_back (fParam (ParamID::lowCutFreq, "Low Cut", Range (20.0f, 1000.0f, 1.0f, 0.3f), 80.0f, hzToText));
+    params.push_back (bParam (ParamID::lowCutActive, "Low Cut On", false));
+
     // ---- Dual amp ----
-    params.push_back (std::make_unique<juce::AudioParameterChoice> (
-        juce::ParameterID { ParamID::ampRouting, 1 }, "Amp Routing",
-        juce::StringArray { "Single", "Series", "Parallel" }, 0));
+    params.push_back (cParam (ParamID::ampRouting, "Amp Routing", { "Single", "Series", "Parallel" }, 0));
     params.push_back (fParam (ParamID::ampALevel, "Amp A Level", Range (-40.0f, 24.0f, 0.1f), 0.0f, dbToText));
     params.push_back (fParam (ParamID::ampBLevel, "Amp B Level", Range (-40.0f, 24.0f, 0.1f), 0.0f, dbToText));
     params.push_back (fParam (ParamID::ampSpread, "Amp Spread", Range (0.0f, 1.0f, 0.01f), 0.5f, pctToText));
+    params.push_back (bParam (ParamID::ampAActive, "Amp A", true));
+    params.push_back (bParam (ParamID::ampBActive, "Amp B", true));
 
-    // ---- Dual cab IR mixer ----
+    // ---- Sag ----
+    params.push_back (fParam (ParamID::sagAmount, "Sag", Range (0.0f, 10.0f, 0.1f), 0.0f,
+                              [] (float v, int) { return juce::String (v, 1); }));
+
+    // ---- Dual cab ----
     params.push_back (bParam (ParamID::cabAActive, "Cab A", false));
     params.push_back (bParam (ParamID::cabBActive, "Cab B", false));
     params.push_back (fParam (ParamID::cabALevel, "Cab A Level", Range (-40.0f, 12.0f, 0.1f), 0.0f, dbToText));
     params.push_back (fParam (ParamID::cabBLevel, "Cab B Level", Range (-40.0f, 12.0f, 0.1f), 0.0f, dbToText));
 
-    // ---- Filters ----
-    params.push_back (fParam (ParamID::hpfFreq, "Hi-Pass", Range (20.0f, 2000.0f, 1.0f, 0.3f), 20.0f, hzToText));
-    params.push_back (bParam (ParamID::hpfActive, "Hi-Pass On", false));
-    params.push_back (fParam (ParamID::lpfFreq, "Low-Pass", Range (1000.0f, 20000.0f, 1.0f, 0.3f), 20000.0f, hzToText));
-    params.push_back (bParam (ParamID::lpfActive, "Low-Pass On", false));
-
-    // ---- API-560 EQ ----
+    // ---- EQ ----
     params.push_back (bParam (ParamID::eqActive, "EQ", false));
     for (int i = 0; i < Api560EQ::kNumBands; ++i)
     {
@@ -163,59 +204,32 @@ APVTS::ParameterLayout NecronamAudioProcessor::createLayout()
         params.push_back (fParam (eqParamID (i), "EQ " + name, Range (-12.0f, 12.0f, 0.1f), 0.0f, dbToText));
     }
 
-    // ---- Saturation (Flesh Render): front (pre-amp) + post (output) ----
-    const char* bands[3]    = { "low", "mid", "high" };
-    const char* bandsUp[3]  = { "Low", "Mid", "High" };
-    const char* stages[3]   = { "sat", "dist", "fuzz" };
-    const char* stagesUp[3] = { "Saturation", "Distortion", "Fuzz" };
+    // ---- Compressor ----
+    params.push_back (bParam (ParamID::compActive, "Compressor", false));
+    params.push_back (fParam (ParamID::compAmount, "Peak Reduction", Range (0.0f, 100.0f, 0.5f), 30.0f,
+                              [] (float v, int) { return juce::String (juce::roundToInt (v)); }));
 
-    params.push_back (bParam (ParamID::frontSatActive, "Front Saturation", false));
-    for (int b = 0; b < 3; ++b)
-        for (int s = 0; s < 3; ++s)
-            params.push_back (fParam (satParamID (true, bands[b], stages[s]),
-                                      "Front " + juce::String (bandsUp[b]) + " " + stagesUp[s],
-                                      Range (0.0f, 1.0f, 0.001f), 0.0f, pctToText));
+    // ---- Post filters ----
+    params.push_back (fParam (ParamID::hpfFreq, "Hi-Pass", Range (20.0f, 2000.0f, 1.0f, 0.3f), 20.0f, hzToText));
+    params.push_back (bParam (ParamID::hpfActive, "Hi-Pass On", false));
+    params.push_back (fParam (ParamID::lpfFreq, "Low-Pass", Range (1000.0f, 20000.0f, 1.0f, 0.3f), 20000.0f, hzToText));
+    params.push_back (bParam (ParamID::lpfActive, "Low-Pass On", false));
 
-    params.push_back (bParam (ParamID::satActive, "Saturation", false));
-    for (int b = 0; b < 3; ++b)
-        for (int s = 0; s < 3; ++s)
-            params.push_back (fParam (satParamID (false, bands[b], stages[s]),
-                                      juce::String (bandsUp[b]) + " " + stagesUp[s],
-                                      Range (0.0f, 1.0f, 0.001f), 0.0f, pctToText));
-
-    // ---- Tuner ----
-    params.push_back (bParam (ParamID::tunerActive, "Tuner", false));
-
-    // ---- Delay ----
+    // ---- FX ----
     params.push_back (bParam (ParamID::delayActive, "Delay", false));
     params.push_back (fParam (ParamID::delayTime, "Delay Time", Range (1.0f, 2000.0f, 1.0f, 0.4f), 350.0f,
                               [] (float v, int) { return juce::String (juce::roundToInt (v)) + " ms"; }));
     params.push_back (fParam (ParamID::delayFeedback, "Delay Feedback", Range (0.0f, 0.95f, 0.001f), 0.35f, pctToText));
     params.push_back (fParam (ParamID::delayMix, "Delay Mix", Range (0.0f, 1.0f, 0.001f), 0.30f, pctToText));
-
-    // ---- Reverb ----
     params.push_back (bParam (ParamID::reverbActive, "Reverb", false));
+    params.push_back (cParam (ParamID::reverbType, "Reverb Type", { "Plate", "Spring" }, 0));
     params.push_back (fParam (ParamID::reverbSize, "Reverb Size", Range (0.0f, 1.0f, 0.001f), 0.5f, pctToText));
     params.push_back (fParam (ParamID::reverbDamp, "Reverb Damp", Range (0.0f, 1.0f, 0.001f), 0.5f, pctToText));
     params.push_back (fParam (ParamID::reverbMix,  "Reverb Mix",  Range (0.0f, 1.0f, 0.001f), 0.25f, pctToText));
+    params.push_back (cParam (ParamID::fxOrder, "FX Order", { "Delay -> Reverb", "Reverb -> Delay" }, 0));
 
-    // ---- FX order ----
-    params.push_back (std::make_unique<juce::AudioParameterChoice> (
-        juce::ParameterID { ParamID::fxOrder, 1 }, "FX Order",
-        juce::StringArray { "Delay -> Reverb", "Reverb -> Delay" }, 0));
-
-    // ---- Front filter section (between front saturation and the amps) ----
-    params.push_back (fParam (ParamID::frontHpfFreq, "Front Hi-Pass", Range (20.0f, 2000.0f, 1.0f, 0.3f), 20.0f, hzToText));
-    params.push_back (bParam (ParamID::frontHpfActive, "Front Hi-Pass On", false));
-    params.push_back (fParam (ParamID::frontLpfFreq, "Front Low-Pass", Range (1000.0f, 20000.0f, 1.0f, 0.3f), 20000.0f, hzToText));
-    params.push_back (bParam (ParamID::frontLpfActive, "Front Low-Pass On", false));
-
-    // ---- Per-amp bypass ----
-    params.push_back (bParam (ParamID::ampAActive, "Amp A", true));
-    params.push_back (bParam (ParamID::ampBActive, "Amp B", true));
-
-    // ---- Clean DI blend (output) ----
-    params.push_back (fParam (ParamID::cleanBlend, "Clean Blend", Range (0.0f, 1.0f, 0.001f), 0.0f, pctToText));
+    // ---- Tuner ----
+    params.push_back (bParam (ParamID::tunerActive, "Tuner", false));
 
     return { params.begin(), params.end() };
 }
@@ -226,54 +240,53 @@ void NecronamAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     mSampleRate = sampleRate;
     mMaxBlock   = samplesPerBlock;
 
-    mMonoIn.setSize     (1, samplesPerBlock);
+    mLanes.setSize      (2, samplesPerBlock);
     mAmpAOut.setSize    (1, samplesPerBlock);
     mAmpBOut.setSize    (1, samplesPerBlock);
     mBus.setSize        (2, samplesPerBlock);
     mCabScratch.setSize (2, samplesPerBlock);
     mCabSum.setSize     (2, samplesPerBlock);
-    mCleanDI.setSize    (1, samplesPerBlock);
+    mCleanDI.setSize    (2, samplesPerBlock);
+    mGateBuf.setSize    (2, samplesPerBlock);
 
     juce::dsp::ProcessSpec monoSpec   { sampleRate, (juce::uint32) samplesPerBlock, 1 };
     juce::dsp::ProcessSpec stereoSpec { sampleRate, (juce::uint32) samplesPerBlock, 2 };
 
     for (int ch = 0; ch < 2; ++ch)
     {
-        mEQ[ch].prepare (sampleRate, samplesPerBlock);
+        mFrontSat[ch].prepare (sampleRate, samplesPerBlock);
         mSaturation[ch].prepare (sampleRate, samplesPerBlock);
+        mEQ[ch].prepare (sampleRate, samplesPerBlock);
+        mLowCut[ch].prepare (monoSpec);
         mHPF[ch].prepare (monoSpec);
         mLPF[ch].prepare (monoSpec);
         *mDCBlocker[ch].coefficients = *juce::dsp::IIR::Coefficients<float>::makeHighPass (sampleRate, 10.0);
         mDCBlocker[ch].reset();
     }
-    mHpfCachedFreq = mLpfCachedFreq = -1.0f;
+    mLowCutCachedFreq = mHpfCachedFreq = mLpfCachedFreq = -1.0f;
 
-    for (int c = 0; c < 2; ++c)
-        mCab[c].conv.prepare (stereoSpec);
-
-    // Front saturation (mono) + end-of-chain stereo FX.
-    mFrontSat.prepare (sampleRate, samplesPerBlock);
+    mDrive.prepare (sampleRate, samplesPerBlock);
+    mSag.prepare (sampleRate);
+    mComp.prepare (sampleRate);
+    mSpring.prepare (sampleRate, samplesPerBlock);
     mReverb.prepare (stereoSpec);
     mReverb.reset();
     mDelay.prepare (stereoSpec);
     mDelay.reset();
-    mFrontSatWasActive = mDelayWasActive = mReverbWasActive = false;
 
-    // Front filter section (mono).
-    mFrontHPF.prepare (monoSpec);
-    mFrontLPF.prepare (monoSpec);
-    mFrontHpfCachedFreq = mFrontLpfCachedFreq = -1.0f;
+    mFrontSatWasActive = mDriveWasActive = mCompWasActive = false;
+    mDelayWasActive = mReverbWasActive = mGateWasActive = mPostSatWasActive = false;
+    mDriveLastCircuit = mReverbLastType = -1;
 
-    // Tuner capture ring.
+    for (int c = 0; c < 2; ++c)
+        mCab[c].conv.prepare (stereoSpec);
+
     mTunerRing.fill (0.0f);
     mTunerWrite.store (0);
 
-    mGateEnv  = 0.0f;
-    mGateGain = 1.0f;
+    mGateEnv[0] = mGateEnv[1] = 0.0f;
+    mGateGain[0] = mGateGain[1] = 1.0f;
 
-    // Reset the active AND staged models for both amps. The staged one matters:
-    // a model restored from state before prepareToPlay was staged without a
-    // Reset, and must be sized here before it can be swapped in and processed.
     for (int a = 0; a < 2; ++a)
     {
         const juce::SpinLock::ScopedLockType l (mAmp[a].swapLock);
@@ -311,11 +324,10 @@ float NecronamAudioProcessor::computeOutputGain() const
 
     float gain = juce::Decibels::decibelsToGain (outDb);
 
-    // Normalized / Calibrated reference Amp A's model metadata (the primary amp).
-    const auto& m = mAmp[0].model;
-    if (mode == 1 && m != nullptr && m->HasLoudness())          // Normalized -> -18 dBFS
+    const auto& m = mAmp[0].model;   // Normalized / Calibrated reference Amp A
+    if (mode == 1 && m != nullptr && m->HasLoudness())
         gain *= juce::Decibels::decibelsToGain (-18.0f - (float) m->GetLoudness());
-    else if (mode == 2 && m != nullptr && m->HasOutputLevel())  // Calibrated -> real dBu
+    else if (mode == 2 && m != nullptr && m->HasOutputLevel())
         gain *= juce::Decibels::decibelsToGain ((float) m->GetOutputLevel() - inputCal);
 
     return gain;
@@ -333,17 +345,19 @@ void NecronamAudioProcessor::updateLatency()
 
     const int la = slotLatency (0);
     const int lb = slotLatency (1);
-    const auto routing = (Routing) (int) apvts.getRawParameterValue (ParamID::ampRouting)->load();
+    const auto mode    = (InputMode) (int) apvts.getRawParameterValue (ParamID::inputMode)->load();
+    const auto routing = (Routing)   (int) apvts.getRawParameterValue (ParamID::ampRouting)->load();
 
     int latency = 0;
-    switch (routing)
-    {
-        case Routing::Single:   latency = la;                  break;
-        case Routing::Series:   latency = la + lb;             break;
-        case Routing::Parallel: latency = juce::jmax (la, lb); break;
-    }
-    // NB: in Parallel, mismatched amp latencies are not internally compensated;
-    // this only arises when the two models have different native sample rates.
+    if (mode == InputMode::Stereo)
+        latency = juce::jmax (la, lb);
+    else
+        switch (routing)
+        {
+            case Routing::Single:   latency = la;                  break;
+            case Routing::Series:   latency = la + lb;             break;
+            case Routing::Parallel: latency = juce::jmax (la, lb); break;
+        }
     setLatencySamples (latency);
 }
 
@@ -363,8 +377,9 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         juce::dsp::ProcessContextReplacing<float> ctx (block);
         f.process (ctx);
     };
+    auto raw = [this] (const char* id) { return apvts.getRawParameterValue (id)->load(); };
 
-    // ---- Hot-swap staged models; honour clear requests (per amp) ----
+    // ---- Hot-swap staged models; honour clear requests ----
     for (int a = 0; a < 2; ++a)
     {
         const juce::SpinLock::ScopedTryLockType l (mAmp[a].swapLock);
@@ -375,44 +390,71 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         if (mAmp[a].clear.exchange (false))
             mAmp[a].model.reset();
 
-    // ---- Sum input to a mono amp-input buffer ----
-    float* mono = mMonoIn.getWritePointer (0);
-    if (numIn >= 2)
+    // ================= 1) INPUT LANES + MASTER INPUT LEVEL ==================
+    const auto inMode  = (InputMode) (int) raw (ParamID::inputMode);
+    const int  nLanes  = inMode == InputMode::Stereo ? 2 : 1;
+
+    float* lane0 = mLanes.getWritePointer (0);
+    float* lane1 = mLanes.getWritePointer (1);
+
+    if (inMode == InputMode::Mono)
     {
-        const float* L = buffer.getReadPointer (0);
-        const float* R = buffer.getReadPointer (1);
-        for (int i = 0; i < numSamples; ++i)
-            mono[i] = 0.5f * (L[i] + R[i]);
+        if (numIn >= 2)
+        {
+            const float* L = buffer.getReadPointer (0);
+            const float* R = buffer.getReadPointer (1);
+            for (int i = 0; i < numSamples; ++i)
+                lane0[i] = 0.5f * (L[i] + R[i]);
+        }
+        else if (numIn == 1)
+            juce::FloatVectorOperations::copy (lane0, buffer.getReadPointer (0), numSamples);
+        else
+            juce::FloatVectorOperations::clear (lane0, numSamples);
     }
-    else if (numIn == 1)
-        juce::FloatVectorOperations::copy (mono, buffer.getReadPointer (0), numSamples);
     else
-        juce::FloatVectorOperations::clear (mono, numSamples);
-
-    // ---- Input gain (+ calibrated input alignment, referencing Amp A) ----
-    const int   mode     = (int) apvts.getRawParameterValue (ParamID::outputMode)->load();
-    const float inputCal = apvts.getRawParameterValue (ParamID::inputCal)->load();
-    float inputGainDb    = apvts.getRawParameterValue (ParamID::inputLevel)->load();
-    if (mode == 2 && mAmp[0].model != nullptr && mAmp[0].model->HasInputLevel())
-        inputGainDb += inputCal - (float) mAmp[0].model->GetInputLevel();
-    juce::FloatVectorOperations::multiply (mono, juce::Decibels::decibelsToGain (inputGainDb), numSamples);
-
-    // NAM input meter (post input gain — what Amp A actually sees).
-    accumulatePeak (mInPeak, blockPeak (mono, numSamples));
-
-    // ---- Capture the dry input into the tuner ring (power-of-two, lock-free) ----
     {
+        if (numIn >= 1) juce::FloatVectorOperations::copy (lane0, buffer.getReadPointer (0), numSamples);
+        else            juce::FloatVectorOperations::clear (lane0, numSamples);
+        if (numIn >= 2) juce::FloatVectorOperations::copy (lane1, buffer.getReadPointer (1), numSamples);
+        else            juce::FloatVectorOperations::copy (lane1, lane0, numSamples);
+    }
+
+    // Input gain (+ calibrated alignment: lane 0 references Amp A; in stereo
+    // mode lane 1 references Amp B).
+    const int   outMode  = (int) raw (ParamID::outputMode);
+    const float inputCal = raw (ParamID::inputCal);
+    const float baseInDb = raw (ParamID::inputLevel);
+    for (int ln = 0; ln < nLanes; ++ln)
+    {
+        float db = baseInDb;
+        const auto& m = mAmp[inMode == InputMode::Stereo ? ln : 0].model;
+        if (outMode == 2 && m != nullptr && m->HasInputLevel())
+            db += inputCal - (float) m->GetInputLevel();
+        juce::FloatVectorOperations::multiply (ln == 0 ? lane0 : lane1,
+                                               juce::Decibels::decibelsToGain (db), numSamples);
+    }
+
+    // IN meter (max of lanes) + tuner capture (mono mix of lanes).
+    {
+        float pk = blockPeak (lane0, numSamples);
+        if (nLanes == 2) pk = juce::jmax (pk, blockPeak (lane1, numSamples));
+        accumulatePeak (mInPeak, pk);
+
         int w = mTunerWrite.load (std::memory_order_relaxed);
         for (int i = 0; i < numSamples; ++i)
         {
-            mTunerRing[(size_t) w] = mono[i];
+            mTunerRing[(size_t) w] = nLanes == 2 ? 0.5f * (lane0[i] + lane1[i]) : lane0[i];
             w = (w + 1) & (kTunerRing - 1);
         }
         mTunerWrite.store (w, std::memory_order_release);
     }
 
-    // ---- Tuner: when engaged, mute the output entirely (silent tuning) ----
-    if (apvts.getRawParameterValue (ParamID::tunerActive)->load() > 0.5f)
+    // Clean DI capture (per lane; mono mode duplicates lane 0).
+    juce::FloatVectorOperations::copy (mCleanDI.getWritePointer (0), lane0, numSamples);
+    juce::FloatVectorOperations::copy (mCleanDI.getWritePointer (1), nLanes == 2 ? lane1 : lane0, numSamples);
+
+    // ---- Tuner engaged: mute everything ----
+    if (raw (ParamID::tunerActive) > 0.5f)
     {
         buffer.clear();
         mNamPeak.store (0.0f);
@@ -420,76 +462,128 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         return;
     }
 
-    // ---- Clean DI capture (post input gain, pre-everything) for the output blend ----
-    juce::FloatVectorOperations::copy (mCleanDI.getWritePointer (0), mono, numSamples);
-
-    // ---- Noise gate (simple downward gate on the pre-amp signal) ----
-    if (apvts.getRawParameterValue (ParamID::gateActive)->load() > 0.5f)
+    // ================= 2) GATE (detector on the direct signal) ==============
+    const bool gateOn   = raw (ParamID::gateActive) > 0.5f;
+    const int  gatePos  = (int) raw (ParamID::gatePosition);   // 0 = pre, 1 = post
+    if (gateOn)
     {
-        const float threshLin = juce::Decibels::decibelsToGain (
-            apvts.getRawParameterValue (ParamID::gateThresh)->load());
-        const float envRel = std::exp (-1.0f / (0.050f * (float) mSampleRate)); // 50 ms
-        const float openC  = std::exp (-1.0f / (0.005f * (float) mSampleRate)); // 5 ms
-        const float closeC = std::exp (-1.0f / (0.100f * (float) mSampleRate)); // 100 ms
-        for (int i = 0; i < numSamples; ++i)
+        const float threshLin = juce::Decibels::decibelsToGain (raw (ParamID::gateThresh));
+        const float envRel = std::exp (-1.0f / (0.050f * (float) mSampleRate));
+        const float openC  = std::exp (-1.0f / (0.005f * (float) mSampleRate));
+        const float closeC = std::exp (-1.0f / (0.100f * (float) mSampleRate));
+
+        for (int ln = 0; ln < nLanes; ++ln)
         {
-            const float a = std::abs (mono[i]);
-            mGateEnv = juce::jmax (a, mGateEnv * envRel);
-            const float target = mGateEnv >= threshLin ? 1.0f : 0.0f;
-            const float c = (target < mGateGain) ? closeC : openC;
-            mGateGain = target + (mGateGain - target) * c;
-            mono[i] *= mGateGain;
+            const float* src = ln == 0 ? lane0 : lane1;   // direct signal keys the gate
+            float* gbuf = mGateBuf.getWritePointer (ln);
+            for (int i = 0; i < numSamples; ++i)
+            {
+                const float a = std::abs (src[i]);
+                mGateEnv[ln] = juce::jmax (a, mGateEnv[ln] * envRel);
+                const float target = mGateEnv[ln] >= threshLin ? 1.0f : 0.0f;
+                const float c = (target < mGateGain[ln]) ? closeC : openC;
+                mGateGain[ln] = target + (mGateGain[ln] - target) * c;
+                gbuf[i] = mGateGain[ln];
+            }
         }
-    }
 
-    // ---- Front saturation (Flesh Render, mono) — immediately before the amps.
-    //      True-bypass: not processed at all while off; reset on the off-edge.
+        if (gatePos == 0)   // apply pre-amp
+            for (int ln = 0; ln < nLanes; ++ln)
+                juce::FloatVectorOperations::multiply (ln == 0 ? lane0 : lane1,
+                                                       mGateBuf.getReadPointer (ln), numSamples);
+    }
+    else if (mGateWasActive)
     {
-        const bool on = apvts.getRawParameterValue (ParamID::frontSatActive)->load() > 0.5f;
+        mGateEnv[0] = mGateEnv[1] = 0.0f;
+        mGateGain[0] = mGateGain[1] = 1.0f;
+    }
+    mGateWasActive = gateOn;
+
+    // ================= 3) FLESH RENDER PRE ===================================
+    {
+        const bool on = raw (ParamID::frontSatActive) > 0.5f;
         if (on)
         {
-            auto band = [this] (const char* b)
+            auto band = [&] (const char* b)
             {
                 Saturation::BandParams p;
-                p.sat  = apvts.getRawParameterValue (satParamID (true, b, "sat"))->load();
-                p.dist = apvts.getRawParameterValue (satParamID (true, b, "dist"))->load();
-                p.fuzz = apvts.getRawParameterValue (satParamID (true, b, "fuzz"))->load();
+                p.sat  = raw (satParamID (true, b, "sat").toRawUTF8());
+                p.dist = raw (satParamID (true, b, "dist").toRawUTF8());
+                p.fuzz = raw (satParamID (true, b, "fuzz").toRawUTF8());
                 return p;
             };
-            mFrontSat.setParams (band ("low"), band ("mid"), band ("high"));
-            mFrontSat.process (mono, numSamples);
+            const auto lo = band ("low"), md = band ("mid"), hi = band ("high");
+            const float xl = raw (ParamID::frontSatXLow), xh = raw (ParamID::frontSatXHigh);
+            for (int ln = 0; ln < nLanes; ++ln)
+            {
+                mFrontSat[ln].setCrossovers (xl, xh);
+                mFrontSat[ln].setParams (lo, md, hi);
+                mFrontSat[ln].process (ln == 0 ? lane0 : lane1, numSamples);
+            }
         }
         else if (mFrontSatWasActive)
-            mFrontSat.reset();
+        {
+            mFrontSat[0].reset();
+            mFrontSat[1].reset();
+        }
         mFrontSatWasActive = on;
     }
 
-    // ---- Front filters (mono) — between the front saturator and the amps ----
-    if (apvts.getRawParameterValue (ParamID::frontHpfActive)->load() > 0.5f)
+    // ================= 4) DRIVE SECTION (switchable circuit) =================
     {
-        const float f = apvts.getRawParameterValue (ParamID::frontHpfFreq)->load();
-        if (std::abs (f - mFrontHpfCachedFreq) > 0.5f)
+        const bool on      = raw (ParamID::driveActive) > 0.5f;
+        const int  circuit = (int) raw (ParamID::driveCircuit);
+        if (on)
         {
-            mFrontHpfCachedFreq = f;
-            *mFrontHPF.coefficients = *juce::dsp::IIR::Coefficients<float>::makeHighPass (mSampleRate, f);
+            if (circuit != mDriveLastCircuit)
+                mDrive.reset();                       // clean switch between circuits
+            if (circuit == DriveCircuits::TCPreamp)
+            {
+                DriveCircuits::TCParams p;
+                p.gain     = raw (ParamID::tcGain);
+                p.bassDb   = raw (ParamID::tcBass);
+                p.midDb    = raw (ParamID::tcMid);
+                p.trebleDb = raw (ParamID::tcTreble);
+                p.levelDb  = raw (ParamID::tcLevel);
+                for (int ln = 0; ln < nLanes; ++ln)
+                    mDrive.processTC (ln, ln == 0 ? lane0 : lane1, numSamples, p);
+            }
+            else
+            {
+                DriveCircuits::TSParams p;
+                p.drive   = raw (ParamID::tsDrive);
+                p.tone    = raw (ParamID::tsTone);
+                p.levelDb = raw (ParamID::tsLevel);
+                for (int ln = 0; ln < nLanes; ++ln)
+                    mDrive.processTS (ln, ln == 0 ? lane0 : lane1, numSamples, p);
+            }
         }
-        processMono (mFrontHPF, mono);
-    }
-    if (apvts.getRawParameterValue (ParamID::frontLpfActive)->load() > 0.5f)
-    {
-        const float f = apvts.getRawParameterValue (ParamID::frontLpfFreq)->load();
-        if (std::abs (f - mFrontLpfCachedFreq) > 0.5f)
-        {
-            mFrontLpfCachedFreq = f;
-            *mFrontLPF.coefficients = *juce::dsp::IIR::Coefficients<float>::makeLowPass (mSampleRate, f);
-        }
-        processMono (mFrontLPF, mono);
+        else if (mDriveWasActive)
+            mDrive.reset();
+        mDriveWasActive   = on;
+        mDriveLastCircuit = circuit;
     }
 
-    // ---- DUAL AMP STAGE -> stereo bus (mBus ch0 = L, ch1 = R) ----
-    const auto  routing = (Routing) (int) apvts.getRawParameterValue (ParamID::ampRouting)->load();
-    const float levelA  = juce::Decibels::decibelsToGain (apvts.getRawParameterValue (ParamID::ampALevel)->load());
-    const float levelB  = juce::Decibels::decibelsToGain (apvts.getRawParameterValue (ParamID::ampBLevel)->load());
+    // ================= 5) LOW CUT ============================================
+    if (raw (ParamID::lowCutActive) > 0.5f)
+    {
+        const float f = raw (ParamID::lowCutFreq);
+        if (std::abs (f - mLowCutCachedFreq) > 0.5f)
+        {
+            mLowCutCachedFreq = f;
+            auto co = juce::dsp::IIR::Coefficients<float>::makeHighPass (mSampleRate, f);
+            *mLowCut[0].coefficients = *co;
+            *mLowCut[1].coefficients = *co;
+        }
+        for (int ln = 0; ln < nLanes; ++ln)
+            processMono (mLowCut[ln], ln == 0 ? lane0 : lane1);
+    }
+
+    // ================= 6) DUAL AMP STAGE -> stereo bus =======================
+    const float levelA = juce::Decibels::decibelsToGain (raw (ParamID::ampALevel));
+    const float levelB = juce::Decibels::decibelsToGain (raw (ParamID::ampBLevel));
+    const bool aActive = raw (ParamID::ampAActive) > 0.5f;
+    const bool bActive = raw (ParamID::ampBActive) > 0.5f;
 
     float* aOut = mAmpAOut.getWritePointer (0);
     float* bOut = mAmpBOut.getWritePointer (0);
@@ -504,134 +598,195 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         else if (out != in)        juce::FloatVectorOperations::copy (out, in, numSamples);
     };
 
-    const bool aActive = apvts.getRawParameterValue (ParamID::ampAActive)->load() > 0.5f;
-    const bool bActive = apvts.getRawParameterValue (ParamID::ampBActive)->load() > 0.5f;
-
-    if (routing == Routing::Single)
+    if (inMode == InputMode::Stereo)
     {
+        // Dual mono: L -> Amp A, R -> Amp B, hard panned.
         if (aActive)
         {
-            runAmp (mAmp[0], mono, aOut);
+            runAmp (mAmp[0], lane0, aOut);
             juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);
             juce::FloatVectorOperations::copy (busL, aOut, numSamples);
-            juce::FloatVectorOperations::copy (busR, aOut, numSamples);
         }
-        else   // amp bypassed -> dry
-        {
-            juce::FloatVectorOperations::copy (busL, mono, numSamples);
-            juce::FloatVectorOperations::copy (busR, mono, numSamples);
-        }
-    }
-    else if (routing == Routing::Series)
-    {
-        // A bypassed -> input passes straight to B; B bypassed -> A feeds the bus.
-        float* sig = mono;
-        if (aActive)
-        {
-            runAmp (mAmp[0], sig, aOut);
-            juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);  // drive into Amp B
-            sig = aOut;
-        }
+        else
+            juce::FloatVectorOperations::copy (busL, lane0, numSamples);
+
         if (bActive)
         {
-            runAmp (mAmp[1], sig, bOut);
+            runAmp (mAmp[1], lane1, bOut);
             juce::FloatVectorOperations::multiply (bOut, levelB, numSamples);
-            sig = bOut;
+            juce::FloatVectorOperations::copy (busR, bOut, numSamples);
         }
-        juce::FloatVectorOperations::copy (busL, sig, numSamples);
-        juce::FloatVectorOperations::copy (busR, sig, numSamples);
+        else
+            juce::FloatVectorOperations::copy (busR, lane1, numSamples);
     }
-    else // Parallel
+    else
     {
-        if (aActive && bActive)
-        {
-            runAmp (mAmp[0], mono, aOut);
-            runAmp (mAmp[1], mono, bOut);
-            juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);
-            juce::FloatVectorOperations::multiply (bOut, levelB, numSamples);
+        const auto routing = (Routing) (int) raw (ParamID::ampRouting);
+        float* mono = lane0;
 
-            const float spread = apvts.getRawParameterValue (ParamID::ampSpread)->load();
-            float gAL, gAR, gBL, gBR;
-            equalPowerPan (-spread, gAL, gAR);   // Amp A toward the left
-            equalPowerPan ( spread, gBL, gBR);   // Amp B toward the right
-            for (int i = 0; i < numSamples; ++i)
+        if (routing == Routing::Single)
+        {
+            if (aActive)
             {
-                busL[i] = aOut[i] * gAL + bOut[i] * gBL;
-                busR[i] = aOut[i] * gAR + bOut[i] * gBR;
+                runAmp (mAmp[0], mono, aOut);
+                juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);
+                juce::FloatVectorOperations::copy (busL, aOut, numSamples);
+                juce::FloatVectorOperations::copy (busR, aOut, numSamples);
+            }
+            else
+            {
+                juce::FloatVectorOperations::copy (busL, mono, numSamples);
+                juce::FloatVectorOperations::copy (busR, mono, numSamples);
             }
         }
-        else if (aActive || bActive)
+        else if (routing == Routing::Series)
         {
-            // One amp bypassed -> the survivor plays centred.
-            const int   ai  = aActive ? 0 : 1;
-            float*      out = aActive ? aOut : bOut;
-            const float lvl = aActive ? levelA : levelB;
-            runAmp (mAmp[ai], mono, out);
-            juce::FloatVectorOperations::multiply (out, lvl, numSamples);
-            juce::FloatVectorOperations::copy (busL, out, numSamples);
-            juce::FloatVectorOperations::copy (busR, out, numSamples);
+            float* sig = mono;
+            if (aActive)
+            {
+                runAmp (mAmp[0], sig, aOut);
+                juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);
+                sig = aOut;
+            }
+            if (bActive)
+            {
+                runAmp (mAmp[1], sig, bOut);
+                juce::FloatVectorOperations::multiply (bOut, levelB, numSamples);
+                sig = bOut;
+            }
+            juce::FloatVectorOperations::copy (busL, sig, numSamples);
+            juce::FloatVectorOperations::copy (busR, sig, numSamples);
         }
-        else   // both bypassed -> dry
+        else // Parallel
         {
-            juce::FloatVectorOperations::copy (busL, mono, numSamples);
-            juce::FloatVectorOperations::copy (busR, mono, numSamples);
+            if (aActive && bActive)
+            {
+                runAmp (mAmp[0], mono, aOut);
+                runAmp (mAmp[1], mono, bOut);
+                juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);
+                juce::FloatVectorOperations::multiply (bOut, levelB, numSamples);
+
+                const float spread = raw (ParamID::ampSpread);
+                float gAL, gAR, gBL, gBR;
+                equalPowerPan (-spread, gAL, gAR);
+                equalPowerPan ( spread, gBL, gBR);
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    busL[i] = aOut[i] * gAL + bOut[i] * gBL;
+                    busR[i] = aOut[i] * gAR + bOut[i] * gBR;
+                }
+            }
+            else if (aActive || bActive)
+            {
+                const int   ai  = aActive ? 0 : 1;
+                float*      out = aActive ? aOut : bOut;
+                const float lvl = aActive ? levelA : levelB;
+                runAmp (mAmp[ai], mono, out);
+                juce::FloatVectorOperations::multiply (out, lvl, numSamples);
+                juce::FloatVectorOperations::copy (busL, out, numSamples);
+                juce::FloatVectorOperations::copy (busR, out, numSamples);
+            }
+            else
+            {
+                juce::FloatVectorOperations::copy (busL, mono, numSamples);
+                juce::FloatVectorOperations::copy (busR, mono, numSamples);
+            }
         }
     }
 
-    // ---- Overall amp-bus output trim ----
-    const float ampOutGain = juce::Decibels::decibelsToGain (
-        apvts.getRawParameterValue (ParamID::namOutput)->load());
+    // Amp-bus trim + NAM meter.
+    const float ampOutGain = juce::Decibels::decibelsToGain (raw (ParamID::namOutput));
     juce::FloatVectorOperations::multiply (busL, ampOutGain, numSamples);
     juce::FloatVectorOperations::multiply (busR, ampOutGain, numSamples);
-
-    // NAM output meter (max of L/R, post amp-bus trim).
     accumulatePeak (mNamPeak, juce::jmax (blockPeak (busL, numSamples), blockPeak (busR, numSamples)));
 
-    // ---- DUAL CAB IR mixer (stereo): convolve the bus through each active cab
-    //      and blend by per-cab level. Bypassed entirely if no cab contributes.
+    // Gate applied POST amp (gain computed from the direct signal above).
+    if (gateOn && gatePos == 1)
     {
-        const bool aOn = apvts.getRawParameterValue (ParamID::cabAActive)->load() > 0.5f && mCab[0].loaded.load();
-        const bool bOn = apvts.getRawParameterValue (ParamID::cabBActive)->load() > 0.5f && mCab[1].loaded.load();
-        if (aOn || bOn)
+        juce::FloatVectorOperations::multiply (busL, mGateBuf.getReadPointer (0), numSamples);
+        juce::FloatVectorOperations::multiply (busR, mGateBuf.getReadPointer (nLanes == 2 ? 1 : 0), numSamples);
+    }
+
+    // ================= 7) SAG ================================================
+    mSag.process (busL, busR, numSamples, raw (ParamID::sagAmount), inMode == InputMode::Mono);
+
+    // ================= 8) CAB IR =============================================
+    {
+        const bool aOn = raw (ParamID::cabAActive) > 0.5f && mCab[0].loaded.load();
+        const bool bOn = raw (ParamID::cabBActive) > 0.5f && mCab[1].loaded.load();
+
+        auto convolveCab = [&] (int c) -> const float*   // returns scratch chans
         {
+            float* sc0 = mCabScratch.getWritePointer (0);
+            float* sc1 = mCabScratch.getWritePointer (1);
+            juce::FloatVectorOperations::copy (sc0, busL, numSamples);
+            juce::FloatVectorOperations::copy (sc1, busR, numSamples);
+            float* ch[2] = { sc0, sc1 };
+            juce::dsp::AudioBlock<float> block (ch, 2, (size_t) numSamples);
+            juce::dsp::ProcessContextReplacing<float> ctx (block);
+            mCab[c].conv.process (ctx);
+            return nullptr;
+        };
+
+        if (inMode == InputMode::Stereo)
+        {
+            // Cab A colours the LEFT channel, Cab B the RIGHT — independent.
+            float* sumL = mCabSum.getWritePointer (0);
+            float* sumR = mCabSum.getWritePointer (1);
+            juce::FloatVectorOperations::copy (sumL, busL, numSamples);
+            juce::FloatVectorOperations::copy (sumR, busR, numSamples);
+
+            if (aOn)
+            {
+                convolveCab (0);
+                juce::FloatVectorOperations::copyWithMultiply (
+                    sumL, mCabScratch.getReadPointer (0),
+                    juce::Decibels::decibelsToGain (raw (ParamID::cabALevel)), numSamples);
+            }
+            if (bOn)
+            {
+                convolveCab (1);
+                juce::FloatVectorOperations::copyWithMultiply (
+                    sumR, mCabScratch.getReadPointer (1),
+                    juce::Decibels::decibelsToGain (raw (ParamID::cabBLevel)), numSamples);
+            }
+            juce::FloatVectorOperations::copy (busL, sumL, numSamples);
+            juce::FloatVectorOperations::copy (busR, sumR, numSamples);
+        }
+        else if (aOn || bOn)
+        {
+            // Mono mode: both cabs colour the whole bus and are blended.
             mCabSum.clear();
             float* sumL = mCabSum.getWritePointer (0);
             float* sumR = mCabSum.getWritePointer (1);
 
-            auto runCab = [&] (int c, const char* levelID)
+            if (aOn)
             {
-                const float gain = juce::Decibels::decibelsToGain (apvts.getRawParameterValue (levelID)->load());
-                float* sc0 = mCabScratch.getWritePointer (0);
-                float* sc1 = mCabScratch.getWritePointer (1);
-                juce::FloatVectorOperations::copy (sc0, busL, numSamples);
-                juce::FloatVectorOperations::copy (sc1, busR, numSamples);
-
-                float* ch[2] = { sc0, sc1 };
-                juce::dsp::AudioBlock<float> block (ch, 2, (size_t) numSamples);
-                juce::dsp::ProcessContextReplacing<float> ctx (block);
-                mCab[c].conv.process (ctx);
-
-                juce::FloatVectorOperations::addWithMultiply (sumL, sc0, gain, numSamples);
-                juce::FloatVectorOperations::addWithMultiply (sumR, sc1, gain, numSamples);
-            };
-
-            if (aOn) runCab (0, ParamID::cabALevel);
-            if (bOn) runCab (1, ParamID::cabBLevel);
-
+                convolveCab (0);
+                const float g = juce::Decibels::decibelsToGain (raw (ParamID::cabALevel));
+                juce::FloatVectorOperations::addWithMultiply (sumL, mCabScratch.getReadPointer (0), g, numSamples);
+                juce::FloatVectorOperations::addWithMultiply (sumR, mCabScratch.getReadPointer (1), g, numSamples);
+            }
+            if (bOn)
+            {
+                convolveCab (1);
+                const float g = juce::Decibels::decibelsToGain (raw (ParamID::cabBLevel));
+                juce::FloatVectorOperations::addWithMultiply (sumL, mCabScratch.getReadPointer (0), g, numSamples);
+                juce::FloatVectorOperations::addWithMultiply (sumR, mCabScratch.getReadPointer (1), g, numSamples);
+            }
             juce::FloatVectorOperations::copy (busL, sumL, numSamples);
             juce::FloatVectorOperations::copy (busR, sumR, numSamples);
         }
     }
 
-    // ---- Per-channel stereo post chain ----
     float* busCh[2] = { busL, busR };
 
-    // DC blocker (~10 Hz, always).
+    // DC blocker (always).
     for (int ch = 0; ch < 2; ++ch)
         processMono (mDCBlocker[ch], busCh[ch]);
 
-    // EQ
-    if (apvts.getRawParameterValue (ParamID::eqActive)->load() > 0.5f)
+    // ================= 9) GRAPHIC EQ =========================================
+    if (raw (ParamID::eqActive) > 0.5f)
     {
         for (int i = 0; i < Api560EQ::kNumBands; ++i)
         {
@@ -643,30 +798,50 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         mEQ[1].process (busR, numSamples);
     }
 
-    // Saturation
-    if (apvts.getRawParameterValue (ParamID::satActive)->load() > 0.5f)
+    // ================= 10) LA-2A COMPRESSOR ==================================
     {
-        auto band = [this] (const char* prefix)
-        {
-            Saturation::BandParams p;
-            p.sat  = apvts.getRawParameterValue (juce::String (prefix) + "_sat")->load();
-            p.dist = apvts.getRawParameterValue (juce::String (prefix) + "_dist")->load();
-            p.fuzz = apvts.getRawParameterValue (juce::String (prefix) + "_fuzz")->load();
-            return p;
-        };
-        const auto lo = band ("low");
-        const auto md = band ("mid");
-        const auto hi = band ("high");
-        mSaturation[0].setParams (lo, md, hi);
-        mSaturation[1].setParams (lo, md, hi);
-        mSaturation[0].process (busL, numSamples);
-        mSaturation[1].process (busR, numSamples);
+        const bool on = raw (ParamID::compActive) > 0.5f;
+        if (on)
+            mComp.process (busL, busR, numSamples, raw (ParamID::compAmount));
+        else if (mCompWasActive)
+            mComp.reset();
+        mCompWasActive = on;
     }
 
-    // Hi-pass
-    if (apvts.getRawParameterValue (ParamID::hpfActive)->load() > 0.5f)
+    // ================= 11) FLESH RENDER POST =================================
     {
-        const float f = apvts.getRawParameterValue (ParamID::hpfFreq)->load();
+        const bool on = raw (ParamID::satActive) > 0.5f;
+        if (on)
+        {
+            auto band = [&] (const char* b)
+            {
+                Saturation::BandParams p;
+                p.sat  = raw (satParamID (false, b, "sat").toRawUTF8());
+                p.dist = raw (satParamID (false, b, "dist").toRawUTF8());
+                p.fuzz = raw (satParamID (false, b, "fuzz").toRawUTF8());
+                return p;
+            };
+            const auto lo = band ("low"), md = band ("mid"), hi = band ("high");
+            const float xl = raw (ParamID::satXLow), xh = raw (ParamID::satXHigh);
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                mSaturation[ch].setCrossovers (xl, xh);
+                mSaturation[ch].setParams (lo, md, hi);
+                mSaturation[ch].process (busCh[ch], numSamples);
+            }
+        }
+        else if (mPostSatWasActive)
+        {
+            mSaturation[0].reset();
+            mSaturation[1].reset();
+        }
+        mPostSatWasActive = on;
+    }
+
+    // ================= 12) POST FILTERS ======================================
+    if (raw (ParamID::hpfActive) > 0.5f)
+    {
+        const float f = raw (ParamID::hpfFreq);
         if (std::abs (f - mHpfCachedFreq) > 0.5f)
         {
             mHpfCachedFreq = f;
@@ -677,11 +852,9 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         for (int ch = 0; ch < 2; ++ch)
             processMono (mHPF[ch], busCh[ch]);
     }
-
-    // Low-pass
-    if (apvts.getRawParameterValue (ParamID::lpfActive)->load() > 0.5f)
+    if (raw (ParamID::lpfActive) > 0.5f)
     {
-        const float f = apvts.getRawParameterValue (ParamID::lpfFreq)->load();
+        const float f = raw (ParamID::lpfFreq);
         if (std::abs (f - mLpfCachedFreq) > 0.5f)
         {
             mLpfCachedFreq = f;
@@ -693,28 +866,26 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             processMono (mLPF[ch], busCh[ch]);
     }
 
-    // ---- End-of-chain FX: Delay & Reverb (order-switchable, true-bypass) ----
-    //      Each module is skipped entirely while off and reset on its off-edge,
-    //      so a bypassed module adds no tail, no colour and no CPU.
+    // ================= 13) FX: DELAY + REVERB (order-switchable) ============
     {
-        const int  order    = (int) apvts.getRawParameterValue (ParamID::fxOrder)->load();
-        const bool delayOn  = apvts.getRawParameterValue (ParamID::delayActive)->load()  > 0.5f;
-        const bool reverbOn = apvts.getRawParameterValue (ParamID::reverbActive)->load() > 0.5f;
+        const int  order    = (int) raw (ParamID::fxOrder);
+        const bool delayOn  = raw (ParamID::delayActive)  > 0.5f;
+        const bool reverbOn = raw (ParamID::reverbActive) > 0.5f;
+        const int  revType  = (int) raw (ParamID::reverbType);
 
         auto runDelay = [&]
         {
             if (delayOn)
             {
-                const float timeMs = apvts.getRawParameterValue (ParamID::delayTime)->load();
-                const float fb     = apvts.getRawParameterValue (ParamID::delayFeedback)->load();
-                const float mix    = apvts.getRawParameterValue (ParamID::delayMix)->load();
+                const float timeMs = raw (ParamID::delayTime);
+                const float fb     = raw (ParamID::delayFeedback);
+                const float mix    = raw (ParamID::delayMix);
                 const float dsamp  = juce::jlimit (1.0f, (float) ((1 << 17) - 2),
                                                    (float) (timeMs * 0.001 * mSampleRate));
                 mDelay.setDelay (dsamp);
-                float* chs[2] = { busL, busR };
                 for (int ch = 0; ch < 2; ++ch)
                 {
-                    float* d = chs[ch];
+                    float* d = busCh[ch];
                     for (int i = 0; i < numSamples; ++i)
                     {
                         const float dry = d[i];
@@ -733,54 +904,71 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         {
             if (reverbOn)
             {
-                const float mix = apvts.getRawParameterValue (ParamID::reverbMix)->load();
-                juce::dsp::Reverb::Parameters rp;
-                rp.roomSize   = apvts.getRawParameterValue (ParamID::reverbSize)->load();
-                rp.damping    = apvts.getRawParameterValue (ParamID::reverbDamp)->load();
-                rp.wetLevel   = mix;
-                rp.dryLevel   = 1.0f - mix;
-                rp.width      = 1.0f;
-                rp.freezeMode = 0.0f;
-                mReverb.setParameters (rp);
+                if (revType != mReverbLastType)
+                {
+                    mReverb.reset();
+                    mSpring.reset();
+                }
+                const float size = raw (ParamID::reverbSize);
+                const float damp = raw (ParamID::reverbDamp);
+                const float mix  = raw (ParamID::reverbMix);
 
-                float* chs[2] = { busL, busR };
-                juce::dsp::AudioBlock<float> block (chs, 2, (size_t) numSamples);
-                juce::dsp::ProcessContextReplacing<float> ctx (block);
-                mReverb.process (ctx);
+                if (revType == 1)      // Spring
+                {
+                    mSpring.process (busL, busR, numSamples, size, damp, mix);
+                }
+                else                   // Plate (tuned Freeverb)
+                {
+                    juce::dsp::Reverb::Parameters rp;
+                    rp.roomSize   = 0.25f + size * 0.65f;
+                    rp.damping    = damp;
+                    rp.wetLevel   = mix;
+                    rp.dryLevel   = 1.0f - mix;
+                    rp.width      = 1.0f;
+                    rp.freezeMode = 0.0f;
+                    mReverb.setParameters (rp);
+
+                    juce::dsp::AudioBlock<float> block (busCh, 2, (size_t) numSamples);
+                    juce::dsp::ProcessContextReplacing<float> ctx (block);
+                    mReverb.process (ctx);
+                }
             }
             else if (mReverbWasActive)
+            {
                 mReverb.reset();
+                mSpring.reset();
+            }
             mReverbWasActive = reverbOn;
+            mReverbLastType  = revType;
         };
 
         if (order == 0) { runDelay(); runReverb(); }
         else            { runReverb(); runDelay(); }
     }
 
-    // ---- Clean DI blend (equal-power crossfade with the processed signal) ----
+    // ================= 14) CLEAN DI BLEND ====================================
     {
-        const float cb = apvts.getRawParameterValue (ParamID::cleanBlend)->load();
+        const float cb = raw (ParamID::cleanBlend);
         if (cb > 1.0e-4f)
         {
             const float wetG = std::cos (cb * 0.5f * juce::MathConstants<float>::pi);
             const float clnG = std::sin (cb * 0.5f * juce::MathConstants<float>::pi);
-            const float* di = mCleanDI.getReadPointer (0);
+            const float* diL = mCleanDI.getReadPointer (0);
+            const float* diR = mCleanDI.getReadPointer (1);
             for (int i = 0; i < numSamples; ++i)
             {
-                busL[i] = busL[i] * wetG + di[i] * clnG;
-                busR[i] = busR[i] * wetG + di[i] * clnG;
+                busL[i] = busL[i] * wetG + diL[i] * clnG;
+                busR[i] = busR[i] * wetG + diR[i] * clnG;
             }
         }
     }
 
-    // ---- Master output gain / mode ----
+    // ================= 15) MASTER OUTPUT =====================================
     const float outGain = computeOutputGain();
     juce::FloatVectorOperations::multiply (busL, outGain, numSamples);
     juce::FloatVectorOperations::multiply (busR, outGain, numSamples);
-
     accumulatePeak (mMasterPeak, juce::jmax (blockPeak (busL, numSamples), blockPeak (busR, numSamples)));
 
-    // ---- Write the stereo result to the outputs ----
     if (numOut >= 2)
     {
         juce::FloatVectorOperations::copy (buffer.getWritePointer (0), busL, numSamples);
@@ -818,7 +1006,6 @@ void NecronamAudioProcessor::loadNamModel (const juce::File& file, int ampIndex)
             wrapped->Reset (mSampleRate, mMaxBlock);
 
         const bool slimmable = wrapped->IsSlimmable();
-        // Apply the current quality before the model goes live (not RT-safe).
         wrapped->SetQuality (apvts.getRawParameterValue (ParamID::quality)->load());
 
         {
@@ -858,9 +1045,6 @@ void NecronamAudioProcessor::loadImpulseResponse (const juce::File& file, int ca
     if (! file.existsAsFile())
         return;
 
-    // juce::dsp::Convolution loads on its own background thread and swaps the IR
-    // in atomically; it resamples the IR to the current spec automatically. The
-    // mono IR (Stereo::no) is applied identically to both channels of the bus.
     mCab[c].conv.loadImpulseResponse (file,
                                       juce::dsp::Convolution::Stereo::no,
                                       juce::dsp::Convolution::Trim::no,
@@ -873,7 +1057,7 @@ void NecronamAudioProcessor::loadImpulseResponse (const juce::File& file, int ca
 void NecronamAudioProcessor::clearImpulseResponse (int cabIndex)
 {
     const int c = idx (cabIndex);
-    mCab[c].loaded.store (false);   // bypass; the convolver simply isn't run
+    mCab[c].loaded.store (false);
     mCab[c].name = {};
     apvts.state.setProperty (kIrPathKey[c], "", nullptr);
 }
@@ -881,8 +1065,6 @@ void NecronamAudioProcessor::clearImpulseResponse (int cabIndex)
 // ===========================================================================
 void NecronamAudioProcessor::parameterChanged (const juce::String&, float)
 {
-    // May fire on the audio thread during automation; defer the non-RT-safe
-    // SetSlimmableSize / setLatencySamples work to the message thread.
     triggerAsyncUpdate();
 }
 
@@ -897,7 +1079,6 @@ void NecronamAudioProcessor::applyQuality()
     const double v = apvts.getRawParameterValue (ParamID::quality)->load();
     for (int a = 0; a < 2; ++a)
     {
-        // Hold the swap lock so the audio thread can't reassign the model mid-apply.
         const juce::SpinLock::ScopedLockType l (mAmp[a].swapLock);
         if (mAmp[a].model  != nullptr) mAmp[a].model->SetQuality (v);
         if (mAmp[a].staged != nullptr) mAmp[a].staged->SetQuality (v);

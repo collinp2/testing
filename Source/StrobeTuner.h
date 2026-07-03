@@ -1,14 +1,23 @@
 #pragma once
 
 // ============================================================================
-//  StrobeTuner
+//  StrobeTuner (v2)
 //  A virtual strobe-tuner display. The editor feeds it the detected frequency
 //  each timer tick; it derives the nearest note + cents offset and scrolls a
 //  strobe band whose drift rate is proportional to how far out of tune you are
-//  (sharp drifts one way, flat the other). When the band appears to stand still
-//  you are in tune.
+//  (sharp drifts one way, flat the other). Standing still = in tune.
+//
+//  v2 stability (aimed at bass):
+//   * median-of-5 on the raw frequency (kills single-frame octave blips)
+//   * note hysteresis — the displayed note only changes after 3 consecutive
+//     frames agree, so it snaps and stays
+//   * dropout hold — brief detection gaps (~0.7 s) keep the last reading
+//     instead of flashing "no pitch"
+//   * cents smoothing for a steady strobe/readout
 // ============================================================================
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -21,23 +30,57 @@ public:
     // freqHz = 0 means "no pitch detected". dtSeconds drives the strobe motion.
     void update (float freqHz, float dtSeconds)
     {
-        mFreq = freqHz;
         if (freqHz > 20.0f)
         {
-            const float midi    = 69.0f + 12.0f * std::log2 (freqHz / 440.0f);
+            // ---- median-of-5 raw smoothing ----
+            mHistory[(size_t) (mHistCount % 5)] = freqHz;
+            mHistCount = juce::jmin (mHistCount + 1, 1000000);
+            const int have = juce::jmin (mHistCount, 5);
+            std::array<float, 5> sorted {};
+            std::copy (mHistory.begin(), mHistory.begin() + have, sorted.begin());
+            std::sort (sorted.begin(), sorted.begin() + have);
+            const float f = sorted[(size_t) (have / 2)];
+
+            const float midi    = 69.0f + 12.0f * std::log2 (f / 440.0f);
             const int   nearest = juce::roundToInt (midi);
-            mCents    = (midi - (float) nearest) * 100.0f;
-            mNoteName = noteName (nearest);
+            const float cents   = (midi - (float) nearest) * 100.0f;
+
+            // ---- note hysteresis: change display note after 3 agreeing frames ----
+            if (nearest == mCandidateNote)
+                ++mCandidateCount;
+            else
+            {
+                mCandidateNote  = nearest;
+                mCandidateCount = 1;
+            }
+            if (mCandidateCount >= 3 || mShownNote == kNoNote)
+                mShownNote = nearest;
+
+            if (mShownNote == nearest)
+                mCents = mCents + 0.5f * (cents - mCents);   // smooth toward target
+            // (frames disagreeing with the shown note leave the cents alone)
+
+            mNoteName = noteName (mShownNote);
             mHasPitch = true;
+            mHoldTime = 0.0f;
             mInTune   = std::abs (mCents) <= 3.0f;
 
             // Drift one full strobe period per second at ~50 cents off.
             mPhase += (mCents / 50.0f) * dtSeconds;
             mPhase -= std::floor (mPhase);
         }
-        else
+        else if (mHasPitch)
         {
-            mHasPitch = false;
+            // ---- dropout hold: keep the reading briefly through gaps ----
+            mHoldTime += dtSeconds;
+            if (mHoldTime > 0.7f)
+            {
+                mHasPitch       = false;
+                mShownNote      = kNoNote;
+                mCandidateNote  = kNoNote;
+                mCandidateCount = 0;
+                mHistCount      = 0;
+            }
         }
         repaint();
     }
@@ -49,10 +92,14 @@ public:
         HorrorLookAndFeel::drawPanelBackground (g, b);
 
         auto area = getLocalBounds().reduced (16);
+        const bool holding = mHasPitch && mHoldTime > 0.05f;
 
-        // Note name (large).
+        // Note name (large; dimmed while holding through a detection gap).
         auto noteArea = area.removeFromTop (juce::jmin (96, area.getHeight() / 2));
-        g.setColour (mHasPitch ? (mInTune ? c (COL_BLOOD_BRIGHT) : c (COL_BONE)) : c (COL_BONE_DIM));
+        juce::Colour noteCol = mHasPitch ? (mInTune ? c (COL_BLOOD_BRIGHT) : c (COL_BONE)) : c (COL_BONE_DIM);
+        if (holding)
+            noteCol = noteCol.withAlpha (0.6f);
+        g.setColour (noteCol);
         g.setFont (HorrorLookAndFeel::monoFont (mHasPitch ? 64.0f : 30.0f, true));
         g.drawText (mHasPitch ? mNoteName : juce::String ("--"), noteArea, juce::Justification::centred);
 
@@ -105,10 +152,15 @@ private:
         return juce::String (names[pc]) + juce::String (oct);
     }
 
-    float        mFreq     = 0.0f;
-    float        mCents    = 0.0f;
-    float        mPhase    = 0.0f;
-    bool         mHasPitch = false;
-    bool         mInTune   = false;
+    static constexpr int kNoNote = -1000;
+
+    std::array<float, 5> mHistory {};
+    int   mHistCount = 0;
+    int   mShownNote = kNoNote, mCandidateNote = kNoNote, mCandidateCount = 0;
+    float mCents    = 0.0f;
+    float mPhase    = 0.0f;
+    float mHoldTime = 0.0f;
+    bool  mHasPitch = false;
+    bool  mInTune   = false;
     juce::String mNoteName;
 };

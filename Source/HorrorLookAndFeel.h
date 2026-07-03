@@ -14,8 +14,8 @@ namespace horror
     inline constexpr juce::uint32 COL_BLOOD        = 0xFF4C0A08; // Oxidized blood red
     inline constexpr juce::uint32 COL_BLOOD_BRIGHT = 0xFF5D0B09; // Brightest accent present (a muted brick)
 
-    inline constexpr juce::uint32 COL_BONE         = 0xFF2A1612; // Near-black crimson for readable text
-    inline constexpr juce::uint32 COL_BONE_DIM     = 0xFF7A6A60; // Faded stain for inactive text/markers
+    inline constexpr juce::uint32 COL_BONE         = 0xFF241210; // Near-black crimson for readable text
+    inline constexpr juce::uint32 COL_BONE_DIM     = 0xFF564539; // Faded stain — darkened for contrast (v2)
 
     inline constexpr juce::uint32 COL_KNOB_BODY    = 0xFF3A0E0C; // Dark clotted knob body
     inline constexpr juce::uint32 COL_KNOB_SHINE   = 0xFF6A2420; // Muted wet shine

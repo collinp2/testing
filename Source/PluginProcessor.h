@@ -10,24 +10,41 @@
 #include "ResamplingNAM.h"
 #include "Api560EQ.h"
 #include "Saturation.h"
+#include "DriveCircuits.h"
+#include "SagProcessor.h"
+#include "OptoCompressor.h"
+#include "SpringReverb.h"
 
 // ============================================================================
-//  NECRONAM MAX  —  AudioProcessor (feature-loaded, true-stereo)
+//  NECRONAM MAX v2  —  AudioProcessor
 //
-//  Signal chain:
-//    sum-to-mono -> input gain -> noise gate
-//      -> DUAL AMP STAGE (two NAM models) producing a STEREO bus:
-//           Single   : Amp A only                  (centred)
-//           Series   : Amp A -> Amp B              (centred)
-//           Parallel : Amp A + Amp B, spread L/R   (true stereo)
-//      -> overall amp-bus trim (OUT meter)
-//      -> DUAL CAB IR mixer (stereo): IR A + IR B convolved & blended
-//      -> [per-channel L/R] DC blocker -> API-560 EQ -> saturation -> HPF -> LPF
-//      -> master output gain / mode
+//  Signal chain (strict order — the UI tabs follow it):
+//    master input level  (master strip, all pages)
+//      -> noise gate     (detector always keyed from this direct signal;
+//                         gain applied PRE or POST amp via a position switch)
+//      -> Flesh Render PRE   (multiband saturation, sweepable crossovers)
+//      -> DRIVE section      (switchable circuit: TC-style integrated preamp
+//                             or generic Tube Screamer)
+//      -> LOW CUT
+//      -> DUAL AMP STAGE (two NAM models)
+//           input mode MONO  : Single / Series / Parallel (+ spread)
+//           input mode STEREO: dual mono — L -> Amp A, R -> Amp B, hard panned
+//      -> [gate applied here when position = POST]
+//      -> SAG            (tube power-amp sag, 0..10)
+//      -> CAB IR         (mono: dual-IR mixer on the bus; stereo: Cab A -> L,
+//                         Cab B -> R, independent)
+//      -> DC blocker
+//      -> API-560 graphic EQ
+//      -> LA-2A style compressor (one knob, auto make-up, GR meter)
+//      -> Flesh Render POST  (stereo, sweepable crossovers)
+//      -> post hi-pass / low-pass
+//      -> DELAY + REVERB (order-switchable; reverb = plate or spring;
+//                         all true-bypassed)
+//      -> clean DI blend
+//      -> master output (Raw / Normalized / Calibrated)
 //
-//  Utility DSP (gate, IR, DC, EQ, filters, saturation) is implemented in JUCE;
-//  only the amp models come from NeuralAmpModelerCore. A separate plugin from
-//  NECRONAM (distinct identity) so both can run side by side.
+//  The tuner taps the direct input (post input gain) and mutes the output
+//  while engaged.
 // ============================================================================
 class NecronamAudioProcessor : public juce::AudioProcessor,
                                private juce::AudioProcessorValueTreeState::Listener,
@@ -70,8 +87,6 @@ public:
     juce::String getLoadedModelName (int ampIndex) const { return mAmp[idx (ampIndex)].name; }
     juce::String getLoadedIRName    (int cabIndex) const { return mCab[idx (cabIndex)].name; }
 
-    // True when the given amp's loaded model is an A2 "slimmable" model that
-    // responds to the Quality control (older A1 models always return false).
     bool isModelSlimmable (int ampIndex) const { return mAmp[idx (ampIndex)].slimmable.load(); }
     bool isAnyModelSlimmable() const { return mAmp[0].slimmable.load() || mAmp[1].slimmable.load(); }
 
@@ -83,100 +98,124 @@ public:
     float fetchInputPeak()  { return mInPeak.exchange (0.0f); }
     float fetchNamPeak()    { return mNamPeak.exchange (0.0f); }
     float fetchMasterPeak() { return mMasterPeak.exchange (0.0f); }
+    // Compressor gain reduction (dB, peak since last read).
+    float fetchGainReductionDb() { return mComp.fetchGainReductionDb(); }
 
     juce::AudioProcessorValueTreeState apvts;
 
     // Parameter IDs (single source of truth, shared with the editor).
     struct ParamID
     {
+        // Master / IO
         static constexpr auto inputLevel   = "input_level";
-        static constexpr auto namOutput    = "nam_output";     // overall amp-bus trim
-        static constexpr auto outputLevel  = "output_level";   // master output
+        static constexpr auto namOutput    = "nam_output";     // amp-bus trim
+        static constexpr auto outputLevel  = "output_level";
         static constexpr auto outputMode   = "output_mode";
         static constexpr auto inputCal     = "input_cal";
+        static constexpr auto cleanBlend   = "clean_blend";
+        static constexpr auto inputMode    = "input_mode";     // Mono / Stereo (dual mono)
+
+        // Gate (detector always keyed from the direct pre-amp signal)
         static constexpr auto gateThresh   = "gate_threshold";
         static constexpr auto gateActive   = "gate_active";
-        static constexpr auto quality      = "quality";        // A2 slimmable size (shared)
+        static constexpr auto gatePosition = "gate_position";  // Pre Amp / Post Amp
 
-        // Dual amp.
-        static constexpr auto ampRouting   = "amp_routing";    // Single / Series / Parallel
+        // Flesh Render PRE (front)
+        static constexpr auto frontSatActive = "fsat_active";
+        static constexpr auto frontSatXLow   = "fsat_xlow";
+        static constexpr auto frontSatXHigh  = "fsat_xhigh";
+        // fs_{low,mid,high}_{sat,dist,fuzz} generated.
+
+        // Drive section (switchable circuit)
+        static constexpr auto driveActive  = "drive_active";
+        static constexpr auto driveCircuit = "drive_circuit";  // TC Preamp / Tube Screamer
+        static constexpr auto tcGain   = "tc_gain";
+        static constexpr auto tcBass   = "tc_bass";
+        static constexpr auto tcMid    = "tc_mid";
+        static constexpr auto tcTreble = "tc_treble";
+        static constexpr auto tcLevel  = "tc_level";
+        static constexpr auto tsDrive  = "ts_drive";
+        static constexpr auto tsTone   = "ts_tone";
+        static constexpr auto tsLevel  = "ts_level";
+
+        // Low cut (pre-amp)
+        static constexpr auto lowCutFreq   = "front_hpf_freq";   // id kept from v1
+        static constexpr auto lowCutActive = "front_hpf_active";
+
+        // Dual amp
+        static constexpr auto ampRouting   = "amp_routing";
         static constexpr auto ampALevel    = "amp_a_level";
         static constexpr auto ampBLevel    = "amp_b_level";
-        static constexpr auto ampSpread    = "amp_spread";     // parallel stereo spread
+        static constexpr auto ampSpread    = "amp_spread";
+        static constexpr auto ampAActive   = "amp_a_active";
+        static constexpr auto ampBActive   = "amp_b_active";
+        static constexpr auto quality      = "quality";
 
-        // Dual cab IR mixer.
+        // Sag
+        static constexpr auto sagAmount    = "sag_amount";
+
+        // Dual cab
         static constexpr auto cabAActive   = "cab_a_active";
         static constexpr auto cabBActive   = "cab_b_active";
         static constexpr auto cabALevel    = "cab_a_level";
         static constexpr auto cabBLevel    = "cab_b_level";
 
+        // EQ
+        static constexpr auto eqActive     = "eq_active";
+        // eq_0 .. eq_9 generated.
+
+        // LA-2A style compressor
+        static constexpr auto compActive   = "comp_active";
+        static constexpr auto compAmount   = "comp_amount";    // Peak Reduction 0..100
+
+        // Flesh Render POST
+        static constexpr auto satActive    = "sat_active";
+        static constexpr auto satXLow      = "sat_xlow";
+        static constexpr auto satXHigh     = "sat_xhigh";
+        // {low,mid,high}_{sat,dist,fuzz} generated.
+
+        // Post filters
         static constexpr auto hpfFreq      = "hpf_freq";
         static constexpr auto hpfActive    = "hpf_active";
         static constexpr auto lpfFreq      = "lpf_freq";
         static constexpr auto lpfActive    = "lpf_active";
 
-        static constexpr auto eqActive     = "eq_active";
-        // eq_0 .. eq_9 generated for the ten bands.
-
-        static constexpr auto satActive    = "sat_active";        // post/output saturator
-        // {low,mid,high}_{sat,dist,fuzz} generated for the post saturator.
-
-        // Front saturation (pre-amp Flesh Render, immediately before the amps).
-        static constexpr auto frontSatActive = "fsat_active";
-        // fs_{low,mid,high}_{sat,dist,fuzz} generated for the front saturator.
-
-        // Strobe tuner (engaging it mutes the plugin output).
-        static constexpr auto tunerActive  = "tuner_active";
-
-        // Delay (stereo, end of chain).
+        // FX
         static constexpr auto delayActive   = "dly_active";
-        static constexpr auto delayTime     = "dly_time";       // ms
+        static constexpr auto delayTime     = "dly_time";
         static constexpr auto delayFeedback = "dly_fb";
         static constexpr auto delayMix      = "dly_mix";
-
-        // Reverb (stereo, end of chain).
         static constexpr auto reverbActive  = "rev_active";
+        static constexpr auto reverbType    = "rev_type";      // Plate / Spring
         static constexpr auto reverbSize    = "rev_size";
         static constexpr auto reverbDamp    = "rev_damp";
         static constexpr auto reverbMix     = "rev_mix";
-
-        // FX order: 0 = Delay -> Reverb, 1 = Reverb -> Delay.
         static constexpr auto fxOrder       = "fx_order";
 
-        // Front filter section (mono, between front saturation and the amps).
-        static constexpr auto frontHpfFreq   = "front_hpf_freq";
-        static constexpr auto frontHpfActive = "front_hpf_active";
-        static constexpr auto frontLpfFreq   = "front_lpf_freq";
-        static constexpr auto frontLpfActive = "front_lpf_active";
-
-        // Per-amp bypass.
-        static constexpr auto ampAActive = "amp_a_active";
-        static constexpr auto ampBActive = "amp_b_active";
-
-        // Clean DI blend at the output.
-        static constexpr auto cleanBlend = "clean_blend";
+        // Tuner
+        static constexpr auto tunerActive  = "tuner_active";
     };
 
-    enum class Routing { Single = 0, Series = 1, Parallel = 2 };
+    enum class Routing   { Single = 0, Series = 1, Parallel = 2 };
+    enum class InputMode { Mono = 0, Stereo = 1 };
 
     static juce::String eqParamID (int band) { return "eq_" + juce::String (band); }
 
-    // Saturation parameter id. front=true -> "fs_low_sat"; front=false -> "low_sat".
+    // Saturation stage param id. front=true -> "fs_low_sat"; front=false -> "low_sat".
     static juce::String satParamID (bool front, const char* band, const char* stage)
     {
         return juce::String (front ? "fs_" : "") + band + "_" + stage;
     }
 
     // Copy the most recent `maxN` dry-input samples (for the tuner) into dest.
-    // Lock-free read of the audio-thread ring; benign tearing is acceptable.
     int readTunerWindow (float* dest, int maxN) const
     {
         const int n = juce::jmin (maxN, kTunerRing);
         const int w = mTunerWrite.load (std::memory_order_acquire);
         for (int i = 0; i < n; ++i)
         {
-            int idx = ((w - n + i) % kTunerRing + kTunerRing) % kTunerRing;
-            dest[i] = mTunerRing[(size_t) idx];
+            int idx2 = ((w - n + i) % kTunerRing + kTunerRing) % kTunerRing;
+            dest[i] = mTunerRing[(size_t) idx2];
         }
         return n;
     }
@@ -192,11 +231,8 @@ private:
 
     float computeOutputGain() const;
     void  updateLatency();
-    void  reloadReferencedFiles();   // re-load models/IRs named in apvts.state
+    void  reloadReferencedFiles();
 
-    // A2 quality + routing are applied off the audio thread (SetSlimmableSize and
-    // setLatencySamples are not real-time safe). Parameter changes trigger an
-    // async update on the message thread.
     void parameterChanged (const juce::String& parameterID, float newValue) override;
     void handleAsyncUpdate() override;
     void applyQuality();
@@ -213,7 +249,7 @@ private:
     };
     AmpSlot mAmp[2];
 
-    // ----- Cab IR slots (juce::dsp::Convolution loads/swaps on its own thread) -
+    // ----- Cab IR slots -------------------------------------------------------
     struct CabSlot
     {
         juce::dsp::Convolution conv;
@@ -222,52 +258,59 @@ private:
     };
     CabSlot mCab[2];
 
-    // ----- Fixed DSP blocks, duplicated per channel for the stereo path ------
-    Api560EQ                      mEQ[2];
-    Saturation                    mSaturation[2];
-    juce::dsp::IIR::Filter<float> mDCBlocker[2];       // ~10 Hz, always on
-    juce::dsp::IIR::Filter<float> mHPF[2];             // user hi-pass
-    juce::dsp::IIR::Filter<float> mLPF[2];             // user low-pass
+    // ----- Pre-chain DSP (per lane: 0 = mono / left, 1 = right) --------------
+    Saturation    mFrontSat[2];
+    DriveCircuits mDrive;
+    juce::dsp::IIR::Filter<float> mLowCut[2];
+    float mLowCutCachedFreq = -1.0f;
+
+    // Gate: envelopes per lane; per-sample gains buffered so the gain can be
+    // applied pre OR post amp (always keyed from the direct signal).
+    float mGateEnv[2]  { 0.0f, 0.0f };
+    float mGateGain[2] { 1.0f, 1.0f };
+    juce::AudioBuffer<float> mGateBuf;
+
+    // ----- Post-chain DSP (stereo) --------------------------------------------
+    SagProcessor   mSag;
+    Api560EQ       mEQ[2];
+    OptoCompressor mComp;
+    Saturation     mSaturation[2];                    // Flesh Render POST
+    juce::dsp::IIR::Filter<float> mDCBlocker[2];
+    juce::dsp::IIR::Filter<float> mHPF[2], mLPF[2];   // post filters
     float mHpfCachedFreq = -1.0f;
     float mLpfCachedFreq = -1.0f;
 
-    // ----- Front filter section (mono, between front saturation and amps) ----
-    juce::dsp::IIR::Filter<float> mFrontHPF, mFrontLPF;
-    float mFrontHpfCachedFreq = -1.0f;
-    float mFrontLpfCachedFreq = -1.0f;
-
-    // ----- Front saturation (mono, immediately before the dual amps) ---------
-    Saturation mFrontSat;
-
-    // ----- End-of-chain time FX (stereo), order-switchable, true-bypassed ----
-    juce::dsp::Reverb mReverb;
+    // FX
+    juce::dsp::Reverb mReverb;                        // plate
+    SpringReverb      mSpring;                        // spring
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> mDelay { 1 << 17 };
 
-    // Edge-detection so a module is reset the instant it is switched off,
-    // guaranteeing zero effect / no leftover tail while bypassed.
+    // True-bypass edge flags.
     bool mFrontSatWasActive = false;
-    bool mDelayWasActive     = false;
-    bool mReverbWasActive    = false;
+    bool mDriveWasActive    = false;
+    int  mDriveLastCircuit  = -1;
+    bool mCompWasActive     = false;
+    bool mDelayWasActive    = false;
+    bool mReverbWasActive   = false;
+    int  mReverbLastType    = -1;
+    bool mGateWasActive     = false;
+    bool mPostSatWasActive  = false;
 
-    // ----- Tuner: lock-free ring capture of the dry input --------------------
-    static constexpr int kTunerRing = 1 << 13;   // 8192 samples
+    // ----- Tuner capture ring --------------------------------------------------
+    static constexpr int kTunerRing = 1 << 13;
     std::array<float, (size_t) kTunerRing> mTunerRing {};
     std::atomic<int> mTunerWrite { 0 };
 
-    // ----- Noise gate (simple downward gate on the pre-amp mono signal) ------
-    float mGateEnv  = 0.0f;
-    float mGateGain = 1.0f;
-
-    // ----- Scratch buffers ---------------------------------------------------
-    juce::AudioBuffer<float> mMonoIn;     // summed mono amp input
+    // ----- Scratch buffers ------------------------------------------------------
+    juce::AudioBuffer<float> mLanes;      // pre-chain lanes (2ch; mono mode uses ch0)
     juce::AudioBuffer<float> mAmpAOut;    // Amp A output (mono)
     juce::AudioBuffer<float> mAmpBOut;    // Amp B output (mono)
-    juce::AudioBuffer<float> mBus;        // stereo bus (cab + post chain)
-    juce::AudioBuffer<float> mCabScratch; // per-cab convolution scratch (stereo)
-    juce::AudioBuffer<float> mCabSum;     // cab mix accumulator (stereo)
-    juce::AudioBuffer<float> mCleanDI;    // clean DI (mono) for the output blend
+    juce::AudioBuffer<float> mBus;        // stereo bus
+    juce::AudioBuffer<float> mCabScratch;
+    juce::AudioBuffer<float> mCabSum;
+    juce::AudioBuffer<float> mCleanDI;    // clean DI (stereo lanes)
 
-    // Meter accumulators (peak, linear), reset when the editor reads them.
+    // Meter accumulators.
     std::atomic<float> mInPeak     { 0.0f };
     std::atomic<float> mNamPeak    { 0.0f };
     std::atomic<float> mMasterPeak { 0.0f };

@@ -1,15 +1,23 @@
 #pragma once
 
 // ============================================================================
-//  Saturation  —  ported from CP Software "Flesh Render"
-//  Three-band multiband saturator. Linkwitz-Riley 4th-order crossovers at
-//  250 Hz and 2 kHz split the signal; each band runs the same
-//  saturation -> distortion -> fuzz waveshaping chain, then the bands are
-//  summed back (complementary LR4 -> flat magnitude).
+//  Saturation  —  Flesh Render multiband saturator (v2 voicing).
+//  Linkwitz-Riley 4th-order crossovers split the signal into three bands; the
+//  crossover frequencies are SWEEPABLE (low/mid and mid/high knobs). Each band
+//  runs saturation -> drive -> fuzz, then the bands are summed back
+//  (complementary LR4 -> flat magnitude at unity settings).
 //
-//  Mono, no oversampling (zero latency) — matching the original Flesh Render
-//  and honouring NECRONAM's low-latency goal. Bright material can alias on
-//  extreme settings; that is the same trade-off as the original.
+//  v2 stage voicings (each level-compensated so engaging a stage doesn't jump
+//  the volume):
+//   * SATURATION — tape / transformer: tanh transfer with a small signal-
+//     dependent bias for gentle even harmonics; soft, warm, compresses peaks.
+//   * DRIVE — plain soft clipping (arctangent transfer): smooth odd-harmonic
+//     overdrive, no hard edge.
+//   * FUZZ — Big Muff style: two cascaded high-gain clipping stages
+//     (soft stage into a harder limit) -> heavily sustained, wall-of-fuzz.
+//
+//  Mono per instance, no oversampling (zero latency). Extreme drive can alias
+//  on bright material — same trade-off as the original Flesh Render.
 // ============================================================================
 
 #include <cmath>
@@ -18,31 +26,36 @@
 class Saturation
 {
 public:
-    // ----- Waveshapers (verbatim from Flesh Render) --------------------------
+    // ----- Waveshapers (v2 voicing, level-compensated) ------------------------
     static inline float applySaturation (float x, float amount) noexcept
     {
         if (amount < 1.0e-4f) return x;
-        const float drive = 1.0f + amount * 19.0f;          // 1 .. 20
+        const float drive = 1.0f + amount * 7.0f;             // 1 .. 8 (tape range)
+        const float bias  = amount * 0.18f;                    // even-harmonic tilt
         const float norm  = 1.0f / std::tanh (drive);
-        return std::tanh (x * drive) * norm;
+        // Asymmetric tanh, re-centred so silence stays at zero (no DC).
+        float y = (std::tanh (drive * x + bias) - std::tanh (bias)) * norm;
+        return y * std::pow (drive, -0.45f) * (1.0f + amount * 0.35f);
     }
 
     static inline float applyDistortion (float x, float amount) noexcept
     {
         if (amount < 1.0e-4f) return x;
-        const float drive = std::pow (100.0f, amount);      // 1 .. 100
-        return (2.0f / juce::MathConstants<float>::pi) * std::atan (x * drive);
+        const float drive = std::pow (30.0f, amount);          // 1 .. 30
+        float y = (2.0f / juce::MathConstants<float>::pi) * std::atan (x * drive);
+        return y * std::pow (drive, -0.5f) * (1.0f + amount * 0.6f);
     }
 
     static inline float applyFuzz (float x, float amount) noexcept
     {
         if (amount < 1.0e-4f) return x;
-        const float drive = std::pow (200.0f, amount);      // 1 .. 200
-        const float bias  = amount * 0.25f;                 // asymmetric push
-        float driven = x * drive + bias;
-        if (driven >  1.0f)  driven =  1.0f;                // hard positive clip
-        if (driven < -0.75f) driven = -0.75f;               // softer negative clip
-        return driven - bias * 0.6f;                        // remove most of bias
+        const float g = 1.0f + amount * 60.0f;                 // 1 .. 61
+        // Stage 1: soft transistor stage.
+        float y = std::tanh (x * g);
+        // Stage 2: driven again and limited harder (diode pair to the rails).
+        y = std::tanh (y * 2.2f);
+        y = juce::jlimit (-0.88f, 0.88f, y * 1.35f);
+        return y * std::pow (g, -0.40f) * (1.0f + amount * 0.8f);
     }
 
     static inline float processChain (float x, float sat, float dist, float fuzz) noexcept
@@ -50,7 +63,7 @@ public:
         x = applySaturation (x, sat);
         x = applyDistortion (x, dist);
         x = applyFuzz        (x, fuzz);
-        return x;                                           // order: sat -> dist -> fuzz
+        return x;                                              // order: sat -> drive -> fuzz
     }
 
     // ----- Lifecycle ---------------------------------------------------------
@@ -62,7 +75,8 @@ public:
         for (auto* f : { &lowLP1, &lowLP2, &midHP1, &midHP2, &midLP1, &midLP2, &highHP1, &highHP2 })
             f->prepare (spec);
 
-        updateCrossovers();
+        mXoverLowMid = mXoverMidHigh = -1.0f;   // force update
+        setCrossovers (250.0f, 2000.0f);
 
         lowBuf.setSize  (1, maxBlockSize);
         midBuf.setSize  (1, maxBlockSize);
@@ -75,6 +89,32 @@ public:
     {
         for (auto* f : { &lowLP1, &lowLP2, &midHP1, &midHP2, &midLP1, &midLP2, &highHP1, &highHP2 })
             f->reset();
+    }
+
+    // Sweepable band split. lowMid and midHigh in Hz; midHigh is kept at least
+    // an octave above lowMid.
+    void setCrossovers (float lowMidHz, float midHighHz)
+    {
+        midHighHz = juce::jmax (midHighHz, lowMidHz * 2.0f);
+        if (std::abs (lowMidHz - mXoverLowMid) < 0.5f && std::abs (midHighHz - mXoverMidHigh) < 0.5f)
+            return;
+
+        mXoverLowMid  = lowMidHz;
+        mXoverMidHigh = midHighHz;
+
+        const double fLowMid  = juce::jlimit (40.0,  1000.0, (double) lowMidHz);
+        const double fMidHigh = juce::jlimit (500.0, 9000.0, (double) midHighHz);
+
+        *lowLP1.coefficients  = *Coeffs::makeLowPass  (mSampleRate, fLowMid);
+        *lowLP2.coefficients  = *Coeffs::makeLowPass  (mSampleRate, fLowMid);
+
+        *midHP1.coefficients  = *Coeffs::makeHighPass (mSampleRate, fLowMid);
+        *midHP2.coefficients  = *Coeffs::makeHighPass (mSampleRate, fLowMid);
+        *midLP1.coefficients  = *Coeffs::makeLowPass  (mSampleRate, fMidHigh);
+        *midLP2.coefficients  = *Coeffs::makeLowPass  (mSampleRate, fMidHigh);
+
+        *highHP1.coefficients = *Coeffs::makeHighPass (mSampleRate, fMidHigh);
+        *highHP2.coefficients = *Coeffs::makeHighPass (mSampleRate, fMidHigh);
     }
 
     struct BandParams { float sat = 0.0f, dist = 0.0f, fuzz = 0.0f; };
@@ -111,23 +151,6 @@ private:
     using Filter = juce::dsp::IIR::Filter<float>;
     using Coeffs = juce::dsp::IIR::Coefficients<float>;
 
-    void updateCrossovers()
-    {
-        constexpr double fLowMid = 250.0;
-        constexpr double fMidHigh = 2000.0;
-
-        *lowLP1.coefficients  = *Coeffs::makeLowPass  (mSampleRate, fLowMid);
-        *lowLP2.coefficients  = *Coeffs::makeLowPass  (mSampleRate, fLowMid);
-
-        *midHP1.coefficients  = *Coeffs::makeHighPass (mSampleRate, fLowMid);
-        *midHP2.coefficients  = *Coeffs::makeHighPass (mSampleRate, fLowMid);
-        *midLP1.coefficients  = *Coeffs::makeLowPass  (mSampleRate, fMidHigh);
-        *midLP2.coefficients  = *Coeffs::makeLowPass  (mSampleRate, fMidHigh);
-
-        *highHP1.coefficients = *Coeffs::makeHighPass (mSampleRate, fMidHigh);
-        *highHP2.coefficients = *Coeffs::makeHighPass (mSampleRate, fMidHigh);
-    }
-
     static void filter (Filter& f, float* data, int numSamples)
     {
         float* channels[1] = { data };
@@ -137,6 +160,7 @@ private:
     }
 
     double mSampleRate = 44100.0;
+    float  mXoverLowMid = -1.0f, mXoverMidHigh = -1.0f;
     Filter lowLP1, lowLP2, midHP1, midHP2, midLP1, midLP2, highHP1, highHP2;
     juce::AudioBuffer<float> lowBuf, midBuf, highBuf;
 
