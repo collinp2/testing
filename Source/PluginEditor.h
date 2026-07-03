@@ -74,6 +74,8 @@ private:
     void timerCallback() override;
     void showTab (int tab);
     void refreshDriveVisibility();
+    void paintContent (juce::Graphics&);
+    void layoutContent();
 
     juce::Slider& addKnob (int tab, const juce::String& paramID, const juce::String& labelText);
     juce::Slider& addVSlider (int tab, const juce::String& paramID, const juce::String& labelText);
@@ -90,6 +92,19 @@ private:
     NecronamAudioProcessor& processor;
     PresetManager           presetManager;
     HorrorLookAndFeel       lnf;
+
+    // ---- Scalable UI ----
+    // Everything lives on this fixed-size canvas; the editor window is
+    // resizable (aspect locked, 75%..200%) and stretches the canvas
+    // uniformly, so the whole UI just gets bigger on larger monitors.
+    static constexpr int kBaseW = 1140, kBaseH = 800;
+    struct ContentComp : public juce::Component
+    {
+        explicit ContentComp (NecronamAudioProcessorEditor& o) : owner (o) {}
+        void paint (juce::Graphics& g) override { owner.paintContent (g); }
+        NecronamAudioProcessorEditor& owner;
+    };
+    ContentComp content { *this };
 
     // ---- Preset bar (persistent) ----
     juce::ComboBox   presetBox;

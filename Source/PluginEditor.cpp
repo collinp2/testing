@@ -29,7 +29,7 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     tunerBuffer.resize (16384, 0.0f);
 
     // ---- Preset bar ----
-    addAndMakeVisible (presetBox);
+    content.addAndMakeVisible (presetBox);
     presetBox.setTextWhenNothingSelected ("(no preset)");
     presetBox.onChange = [this]
     {
@@ -37,9 +37,9 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
         if (name.isNotEmpty() && name != presetManager.getCurrentName())
             presetManager.load (name);
     };
-    addAndMakeVisible (presetPrevButton);
-    addAndMakeVisible (presetNextButton);
-    addAndMakeVisible (presetSaveButton);
+    content.addAndMakeVisible (presetPrevButton);
+    content.addAndMakeVisible (presetNextButton);
+    content.addAndMakeVisible (presetSaveButton);
     presetPrevButton.onClick = [this] { presetManager.step (-1); refreshPresetBox(); };
     presetNextButton.onClick = [this] { presetManager.step ( 1); refreshPresetBox(); };
     presetSaveButton.onClick = [this] { savePresetDialog(); };
@@ -51,7 +51,7 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
                      TabDef { &tabPostButton, TabPost },   TabDef { &tabFxButton, TabFx },
                      TabDef { &tabTunerButton, TabTuner } })
     {
-        addAndMakeVisible (*t.btn);
+        content.addAndMakeVisible (*t.btn);
         t.btn->setClickingTogglesState (false);
         const int tab = t.tab;
         t.btn->onClick = [this, tab] { showTab (tab); };
@@ -60,7 +60,7 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     // Solo Amp/Cab switch — lives in the tab bar, lights up vivid red when on.
     soloButton.setClickingTogglesState (true);
     soloButton.getProperties().set ("bright", true);
-    addAndMakeVisible (soloButton);
+    content.addAndMakeVisible (soloButton);
     soloAttach = std::make_unique<ButtonAttach> (processor.apvts, ID::soloAmpCab, soloButton);
 
     // =====================================================================
@@ -71,33 +71,33 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     masterFader.setSliderStyle (juce::Slider::LinearVertical);
     masterFader.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 66, 17);
     masterFader.setColour (juce::Slider::textBoxTextColourId, c (COL_BONE));
-    addAndMakeVisible (masterFader);
+    content.addAndMakeVisible (masterFader);
     sliderAttachments.push_back (std::make_unique<SliderAttach> (processor.apvts, ID::outputLevel, masterFader));
 
     cleanKnob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
     cleanKnob.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f, juce::MathConstants<float>::pi * 2.75f, true);
     cleanKnob.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 68, 16);
     cleanKnob.setColour (juce::Slider::textBoxTextColourId, c (COL_BONE));
-    addAndMakeVisible (cleanKnob);
+    content.addAndMakeVisible (cleanKnob);
     sliderAttachments.push_back (std::make_unique<SliderAttach> (processor.apvts, ID::cleanBlend, cleanKnob));
 
-    addAndMakeVisible (outputModeBox);
+    content.addAndMakeVisible (outputModeBox);
     outputModeBox.addItemList ({ "Raw", "Normalized", "Calibrated" }, 1);
     outputModeAttach = std::make_unique<ComboAttach> (processor.apvts, ID::outputMode, outputModeBox);
 
     inMeter.caption     = "IN";
     namOutMeter.caption = "OUT";
     masterMeter.caption = "OUT";
-    addAndMakeVisible (inMeter);                       // master strip (persistent)
-    addAndMakeVisible (masterMeter);
-    addAndMakeVisible (namOutMeter); assignTab (namOutMeter, TabAmpCab);
+    content.addAndMakeVisible (inMeter);                       // master strip (persistent)
+    content.addAndMakeVisible (masterMeter);
+    content.addAndMakeVisible (namOutMeter); assignTab (namOutMeter, TabAmpCab);
 
     // =====================================================================
     // PRE tab — gate, Flesh Render pre, drive, low cut
     // =====================================================================
     gateKnob   = &addKnob (TabPre, ID::gateThresh, "GATE THR");
     gateToggle = &addToggle (TabPre, ID::gateActive, "On");
-    addAndMakeVisible (gatePosBox);
+    content.addAndMakeVisible (gatePosBox);
     assignTab (gatePosBox, TabPre);
     gatePosBox.addItemList ({ "Pre Amp", "Post Amp" }, 1);
     gatePosAttach = std::make_unique<ComboAttach> (processor.apvts, ID::gatePosition, gatePosBox);
@@ -107,7 +107,7 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     frontXHighKnob = &addKnob (TabPre, ID::frontSatXHigh, "X-HIGH");
 
     driveToggle = &addToggle (TabPre, ID::driveActive, "On");
-    addAndMakeVisible (driveCircuitBox);
+    content.addAndMakeVisible (driveCircuitBox);
     assignTab (driveCircuitBox, TabPre);
     driveCircuitBox.addItemList ({ "TC Preamp", "Tube Screamer" }, 1);
     driveCircuitAttach = std::make_unique<ComboAttach> (processor.apvts, ID::driveCircuit, driveCircuitBox);
@@ -145,7 +145,7 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     // =====================================================================
     // AMP / CAB tab
     // =====================================================================
-    addAndMakeVisible (inputModeBox);
+    content.addAndMakeVisible (inputModeBox);
     assignTab (inputModeBox, TabAmpCab);
     inputModeBox.addItemList ({ "Mono", "Stereo (Dual Mono)" }, 1);
     inputModeAttach = std::make_unique<ComboAttach> (processor.apvts, ID::inputMode, inputModeBox);
@@ -153,7 +153,7 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     for (auto* b : { &loadModelAButton, &clearModelAButton, &loadModelBButton, &clearModelBButton,
                      &prevAButton, &nextAButton, &prevBButton, &nextBButton })
     {
-        addAndMakeVisible (*b);
+        content.addAndMakeVisible (*b);
         assignTab (*b, TabAmpCab);
     }
     loadModelAButton.onClick  = [this] { chooseModel (0); };
@@ -170,11 +170,11 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
         l->setFont (monoFont (11.0f, false));
         l->setColour (juce::Label::textColourId, c (COL_BONE));
         l->setJustificationType (juce::Justification::centredLeft);
-        addAndMakeVisible (*l);
+        content.addAndMakeVisible (*l);
         assignTab (*l, TabAmpCab);
     }
 
-    addAndMakeVisible (routingBox);
+    content.addAndMakeVisible (routingBox);
     assignTab (routingBox, TabAmpCab);
     routingBox.addItemList ({ "Single", "Series", "Parallel" }, 1);
     routingAttach = std::make_unique<ComboAttach> (processor.apvts, ID::ampRouting, routingBox);
@@ -195,7 +195,7 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     qualitySlider.setSliderStyle (juce::Slider::LinearHorizontal);
     qualitySlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 104, 18);
     qualitySlider.setColour (juce::Slider::textBoxTextColourId, c (COL_BONE));
-    addAndMakeVisible (qualitySlider);
+    content.addAndMakeVisible (qualitySlider);
     assignTab (qualitySlider, TabAmpCab);
     sliderAttachments.push_back (std::make_unique<SliderAttach> (processor.apvts, ID::quality, qualitySlider));
 
@@ -203,7 +203,7 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
 
     for (auto* b : { &loadIRAButton, &clearIRAButton, &loadIRBButton, &clearIRBButton })
     {
-        addAndMakeVisible (*b);
+        content.addAndMakeVisible (*b);
         assignTab (*b, TabAmpCab);
     }
     loadIRAButton.onClick  = [this] { chooseIR (0); };
@@ -216,7 +216,7 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
         l->setFont (monoFont (11.0f, false));
         l->setColour (juce::Label::textColourId, c (COL_BONE));
         l->setJustificationType (juce::Justification::centredLeft);
-        addAndMakeVisible (*l);
+        content.addAndMakeVisible (*l);
         assignTab (*l, TabAmpCab);
     }
     cabAToggle    = &addToggle (TabAmpCab, ID::cabAActive, "On");
@@ -243,7 +243,7 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     compToggle   = &addToggle (TabPost, ID::compActive, "On");
     compKnob     = &addKnob (TabPost, ID::compAmount, "PEAK REDUCTION");
     compGainKnob = &addKnob (TabPost, ID::compGain,   "GAIN");
-    addAndMakeVisible (grMeter);
+    content.addAndMakeVisible (grMeter);
     assignTab (grMeter, TabPost);
 
     satToggle   = &addToggle (TabPost, ID::satActive, "On");
@@ -271,12 +271,12 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     delayToggle    = &addToggle (TabFx, ID::delayActive,  "Delay On");
     reverbToggle   = &addToggle (TabFx, ID::reverbActive, "Reverb On");
 
-    addAndMakeVisible (reverbTypeBox);
+    content.addAndMakeVisible (reverbTypeBox);
     assignTab (reverbTypeBox, TabFx);
     reverbTypeBox.addItemList ({ "Plate", "Spring" }, 1);
     reverbTypeAttach = std::make_unique<ComboAttach> (processor.apvts, ID::reverbType, reverbTypeBox);
 
-    addAndMakeVisible (fxOrderBox);
+    content.addAndMakeVisible (fxOrderBox);
     assignTab (fxOrderBox, TabFx);
     fxOrderBox.addItemList ({ "Delay -> Reverb", "Reverb -> Delay" }, 1);
     fxOrderAttach = std::make_unique<ComboAttach> (processor.apvts, ID::fxOrder, fxOrderBox);
@@ -285,11 +285,26 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     // TUNER tab
     // =====================================================================
     tunerToggle = &addToggle (TabTuner, ID::tunerActive, "TUNER  (mutes output)");
-    addAndMakeVisible (strobeTuner);
+    content.addAndMakeVisible (strobeTuner);
     assignTab (strobeTuner, TabTuner);
 
     startTimerHz (30);
-    setSize (1140, 800);
+
+    // Scalable UI: children live on the fixed-size canvas; the window can be
+    // dragged to any size (aspect locked) and everything scales uniformly.
+    this->addAndMakeVisible (content);
+    content.setBounds (0, 0, kBaseW, kBaseH);
+    layoutContent();
+
+    setResizable (true, true);
+    if (auto* cs = getConstrainer())
+    {
+        cs->setFixedAspectRatio ((double) kBaseW / (double) kBaseH);
+        cs->setSizeLimits (kBaseW * 3 / 4, kBaseH * 3 / 4, kBaseW * 2, kBaseH * 2);
+    }
+    const int savedW = juce::jlimit (kBaseW * 3 / 4, kBaseW * 2,
+                                     (int) processor.apvts.state.getProperty ("editor_w", kBaseW));
+    setSize (savedW, juce::roundToInt (savedW * (double) kBaseH / (double) kBaseW));
     showTab (TabAmpCab);          // always open on AMP / CAB
 }
 
@@ -307,14 +322,14 @@ juce::Slider& NecronamAudioProcessorEditor::addKnob (int tab, const juce::String
                             juce::MathConstants<float>::pi * 2.75f, true);
     s->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 74, 17);
     s->setColour (juce::Slider::textBoxTextColourId, c (COL_BONE));
-    addAndMakeVisible (*s);
+    content.addAndMakeVisible (*s);
     if (tab >= 0) assignTab (*s, tab);
 
     auto lab = std::make_unique<juce::Label> (juce::String(), labelText);
     lab->setJustificationType (juce::Justification::centred);
     lab->setFont (monoFont (10.0f));
     lab->setColour (juce::Label::textColourId, c (COL_BONE));
-    addAndMakeVisible (*lab);
+    content.addAndMakeVisible (*lab);
     lab->attachToComponent (s.get(), false);
     if (tab >= 0) assignTab (*lab, tab);
 
@@ -331,14 +346,14 @@ juce::Slider& NecronamAudioProcessorEditor::addVSlider (int tab, const juce::Str
     auto s = std::make_unique<juce::Slider> (juce::Slider::LinearVertical, juce::Slider::TextBoxBelow);
     s->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 56, 16);
     s->setColour (juce::Slider::textBoxTextColourId, c (COL_BONE));
-    addAndMakeVisible (*s);
+    content.addAndMakeVisible (*s);
     if (tab >= 0) assignTab (*s, tab);
 
     auto lab = std::make_unique<juce::Label> (juce::String(), labelText);
     lab->setJustificationType (juce::Justification::centred);
     lab->setFont (monoFont (9.5f));
     lab->setColour (juce::Label::textColourId, c (COL_BONE));
-    addAndMakeVisible (*lab);
+    content.addAndMakeVisible (*lab);
     lab->attachToComponent (s.get(), false);
     if (tab >= 0) assignTab (*lab, tab);
 
@@ -355,7 +370,7 @@ juce::Slider& NecronamAudioProcessorEditor::addHSlider (int tab, const juce::Str
     auto s = std::make_unique<juce::Slider> (juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight);
     s->setTextBoxStyle (juce::Slider::TextBoxRight, false, 68, 18);
     s->setColour (juce::Slider::textBoxTextColourId, c (COL_BONE));
-    addAndMakeVisible (*s);
+    content.addAndMakeVisible (*s);
     if (tab >= 0) assignTab (*s, tab);
     sliderAttachments.push_back (std::make_unique<SliderAttach> (processor.apvts, paramID, *s));
 
@@ -368,7 +383,7 @@ juce::TextButton& NecronamAudioProcessorEditor::addToggle (int tab, const juce::
 {
     auto b = std::make_unique<juce::TextButton> (text);
     b->setClickingTogglesState (true);
-    addAndMakeVisible (*b);
+    content.addAndMakeVisible (*b);
     if (tab >= 0) assignTab (*b, tab);
     buttonAttachments.push_back (std::make_unique<ButtonAttach> (processor.apvts, paramID, *b));
 
@@ -481,7 +496,7 @@ void NecronamAudioProcessorEditor::showTab (int tab)
     currentTab = tab;
     const int circuit = (int) processor.apvts.getRawParameterValue (ID::driveCircuit)->load();
 
-    for (auto* ch : getChildren())
+    for (auto* ch : content.getChildren())
     {
         const auto& props = ch->getProperties();
         if (! props.contains ("tab"))
@@ -531,8 +546,8 @@ void NecronamAudioProcessorEditor::timerCallback()
     {
         qualitySlider.setEnabled (slim);
         qualitySlider.setAlpha (slim ? 1.0f : 0.45f);
-        repaint (qualityLabelArea);
-        repaint (getWidth() - 90, 0, 90, 84);
+        content.repaint (qualityLabelArea);
+        content.repaint (kBaseW - 90, 0, 90, 84);
     }
 
     // Grey out what the current input mode / routing doesn't use.
@@ -592,7 +607,12 @@ void NecronamAudioProcessorEditor::timerCallback()
 // ===========================================================================
 void NecronamAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    const auto w = getWidth();
+    g.fillAll (c (COL_BACKGROUND));   // letterbox behind the scaled canvas
+}
+
+void NecronamAudioProcessorEditor::paintContent (juce::Graphics& g)
+{
+    const int w = kBaseW;
     g.fillAll (c (COL_BACKGROUND));
 
     // Header.
@@ -777,15 +797,24 @@ void NecronamAudioProcessorEditor::paint (juce::Graphics& g)
     g.setColour (c (COL_BONE));
     g.setFont (monoFont (10.0f));
     g.drawText ("CP SOFTWARE  -  NECRONAM MAX v2.0  -  NEURAL AMP NECROMANCY",
-                juce::Rectangle<int> (0, getHeight() - 26, w, 22), juce::Justification::centred);
+                juce::Rectangle<int> (0, kBaseH - 26, w, 22), juce::Justification::centred);
 
-    HorrorLookAndFeel::drawGrainTexture (g, getLocalBounds());
+    HorrorLookAndFeel::drawGrainTexture (g, juce::Rectangle<int> (0, 0, kBaseW, kBaseH));
 }
 
 // ===========================================================================
 void NecronamAudioProcessorEditor::resized()
 {
-    auto area = getLocalBounds();
+    // Uniform scale: the layout stays at the fixed base size; the canvas is
+    // stretched to fill the window (aspect ratio locked by the constrainer).
+    const float scale = getWidth() / (float) kBaseW;
+    content.setTransform (juce::AffineTransform::scale (scale));
+    processor.apvts.state.setProperty ("editor_w", getWidth(), nullptr);
+}
+
+void NecronamAudioProcessorEditor::layoutContent()
+{
+    auto area = juce::Rectangle<int> (0, 0, kBaseW, kBaseH);
     area.removeFromTop (84);
     area.removeFromBottom (28);
     area.reduce (12, 8);
