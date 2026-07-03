@@ -186,7 +186,7 @@ void HorrorLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w
 // ---------------------------------------------------------------------------
 juce::Font HorrorLookAndFeel::getLabelFont (juce::Label&)
 {
-    return monoFont (10.5f, true);
+    return monoFont (12.0f, true);
 }
 
 void HorrorLookAndFeel::drawLabel (juce::Graphics& g, juce::Label& label)
@@ -203,21 +203,31 @@ void HorrorLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b
 {
     auto bounds = b.getLocalBounds().toFloat().reduced (1.0f);
     const bool on = b.getToggleState();
+    // "bright" property (the SOLO AMP/CAB switch): unmissable vivid red when on.
+    const bool bright = on && b.getProperties().contains ("bright");
 
-    juce::Colour fill = on ? c (COL_BLOOD_DARK) : c (COL_PANEL_BG);
+    juce::Colour fill = bright ? c (COL_SOLO)
+                       : on    ? c (COL_BLOOD_DARK)
+                               : c (COL_PANEL_BG);
     if (down)        fill = fill.brighter (0.15f);
     else if (highlighted) fill = fill.brighter (0.08f);
 
+    if (bright)   // outer glow
+    {
+        g.setColour (c (COL_SOLO).withAlpha (0.35f));
+        g.fillRoundedRectangle (bounds.expanded (3.0f), 5.0f);
+    }
+
     g.setColour (fill);
     g.fillRoundedRectangle (bounds, 3.0f);
-    g.setColour (on ? c (COL_BLOOD_BRIGHT) : c (COL_PANEL_BORDER));
-    g.drawRoundedRectangle (bounds, 3.0f, 1.2f);
+    g.setColour (bright ? c (COL_BONE_LIGHT) : on ? c (COL_BLOOD_BRIGHT) : c (COL_PANEL_BORDER));
+    g.drawRoundedRectangle (bounds, 3.0f, bright ? 1.8f : 1.2f);
 }
 
 void HorrorLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b, bool, bool)
 {
     g.setColour (b.getToggleState() ? c (COL_BONE_LIGHT) : c (COL_BONE));
-    g.setFont (monoFont (11.0f, true));
+    g.setFont (monoFont (12.5f, true));
     g.drawFittedText (b.getButtonText().toUpperCase(), b.getLocalBounds(), juce::Justification::centred, 1, 0.85f);
 }
 

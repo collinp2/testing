@@ -6,9 +6,10 @@ using ID = NecronamAudioProcessor::ParamID;
 
 namespace
 {
+    // All editor-painted text runs ~15% larger for legibility (v2.1).
     juce::Font monoFont (float h, bool bold = true)
     {
-        return HorrorLookAndFeel::monoFont (h, bold);
+        return HorrorLookAndFeel::monoFont (h * 1.15f, bold);
     }
 
     juce::Font logoFont (float h)
@@ -25,7 +26,7 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     : AudioProcessorEditor (&p), processor (p), presetManager (p)
 {
     setLookAndFeel (&lnf);
-    tunerBuffer.resize (8192, 0.0f);
+    tunerBuffer.resize (16384, 0.0f);
 
     // ---- Preset bar ----
     addAndMakeVisible (presetBox);
@@ -56,20 +57,26 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
         t.btn->onClick = [this, tab] { showTab (tab); };
     }
 
+    // Solo Amp/Cab switch — lives in the tab bar, lights up vivid red when on.
+    soloButton.setClickingTogglesState (true);
+    soloButton.getProperties().set ("bright", true);
+    addAndMakeVisible (soloButton);
+    soloAttach = std::make_unique<ButtonAttach> (processor.apvts, ID::soloAmpCab, soloButton);
+
     // =====================================================================
     // MASTER STRIP (persistent — untagged so every tab shows it)
     // =====================================================================
     inputKnob = &addKnob (-1, ID::inputLevel, "INPUT");
 
     masterFader.setSliderStyle (juce::Slider::LinearVertical);
-    masterFader.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 60, 15);
+    masterFader.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 66, 17);
     masterFader.setColour (juce::Slider::textBoxTextColourId, c (COL_BONE));
     addAndMakeVisible (masterFader);
     sliderAttachments.push_back (std::make_unique<SliderAttach> (processor.apvts, ID::outputLevel, masterFader));
 
     cleanKnob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
     cleanKnob.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f, juce::MathConstants<float>::pi * 2.75f, true);
-    cleanKnob.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 64, 14);
+    cleanKnob.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 68, 16);
     cleanKnob.setColour (juce::Slider::textBoxTextColourId, c (COL_BONE));
     addAndMakeVisible (cleanKnob);
     sliderAttachments.push_back (std::make_unique<SliderAttach> (processor.apvts, ID::cleanBlend, cleanKnob));
@@ -181,7 +188,7 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     ampBToggle    = &addToggle (TabAmpCab, ID::ampBActive, "On");
 
     qualitySlider.setSliderStyle (juce::Slider::LinearHorizontal);
-    qualitySlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 96, 16);
+    qualitySlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 104, 18);
     qualitySlider.setColour (juce::Slider::textBoxTextColourId, c (COL_BONE));
     addAndMakeVisible (qualitySlider);
     assignTab (qualitySlider, TabAmpCab);
@@ -224,8 +231,9 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
         eqSliders[(size_t) i] = &addVSlider (TabPost, NecronamAudioProcessor::eqParamID (i), name);
     }
 
-    compToggle = &addToggle (TabPost, ID::compActive, "On");
-    compKnob   = &addKnob (TabPost, ID::compAmount, "PEAK REDUCTION");
+    compToggle   = &addToggle (TabPost, ID::compActive, "On");
+    compKnob     = &addKnob (TabPost, ID::compAmount, "PEAK REDUCTION");
+    compGainKnob = &addKnob (TabPost, ID::compGain,   "GAIN");
     addAndMakeVisible (grMeter);
     assignTab (grMeter, TabPost);
 
@@ -288,7 +296,7 @@ juce::Slider& NecronamAudioProcessorEditor::addKnob (int tab, const juce::String
                                              juce::Slider::TextBoxBelow);
     s->setRotaryParameters (juce::MathConstants<float>::pi * 1.25f,
                             juce::MathConstants<float>::pi * 2.75f, true);
-    s->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 66, 15);
+    s->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 74, 17);
     s->setColour (juce::Slider::textBoxTextColourId, c (COL_BONE));
     addAndMakeVisible (*s);
     if (tab >= 0) assignTab (*s, tab);
@@ -312,7 +320,7 @@ juce::Slider& NecronamAudioProcessorEditor::addKnob (int tab, const juce::String
 juce::Slider& NecronamAudioProcessorEditor::addVSlider (int tab, const juce::String& paramID, const juce::String& labelText)
 {
     auto s = std::make_unique<juce::Slider> (juce::Slider::LinearVertical, juce::Slider::TextBoxBelow);
-    s->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 50, 14);
+    s->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 56, 16);
     s->setColour (juce::Slider::textBoxTextColourId, c (COL_BONE));
     addAndMakeVisible (*s);
     if (tab >= 0) assignTab (*s, tab);
@@ -336,7 +344,7 @@ juce::Slider& NecronamAudioProcessorEditor::addVSlider (int tab, const juce::Str
 juce::Slider& NecronamAudioProcessorEditor::addHSlider (int tab, const juce::String& paramID)
 {
     auto s = std::make_unique<juce::Slider> (juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight);
-    s->setTextBoxStyle (juce::Slider::TextBoxRight, false, 62, 16);
+    s->setTextBoxStyle (juce::Slider::TextBoxRight, false, 68, 18);
     s->setColour (juce::Slider::textBoxTextColourId, c (COL_BONE));
     addAndMakeVisible (*s);
     if (tab >= 0) assignTab (*s, tab);
@@ -543,6 +551,20 @@ void NecronamAudioProcessorEditor::timerCallback()
 
     // Drive circuit switch (from automation or the combo).
     refreshDriveVisibility();
+
+    // Solo Amp/Cab: grey out the bypassed tabs and jump to AMP/CAB on engage.
+    const bool solo = processor.apvts.getRawParameterValue (ID::soloAmpCab)->load() > 0.5f;
+    if (solo != lastSolo)
+    {
+        lastSolo = solo;
+        for (auto* tb : { &tabPreButton, &tabPostButton, &tabFxButton, &tabTunerButton })
+        {
+            tb->setEnabled (! solo);
+            tb->setAlpha (solo ? 0.35f : 1.0f);
+        }
+        if (solo)
+            showTab (TabAmpCab);
+    }
 
     // Tuner.
     if (processor.apvts.getRawParameterValue (ID::tunerActive)->load() > 0.5f)
@@ -774,10 +796,12 @@ void NecronamAudioProcessorEditor::resized()
     }
     area.removeFromTop (8);
 
-    // ---- Tab bar ----
+    // ---- Tab bar (+ the Solo Amp/Cab switch on the right) ----
     tabBarArea = area.removeFromTop (30);
     {
         auto tb = tabBarArea;
+        soloButton.setBounds (tb.removeFromRight (170));
+        tb.removeFromRight (10);
         const int bw = 120;
         tabPreButton.setBounds    (tb.removeFromLeft (bw)); tb.removeFromLeft (4);
         tabAmpCabButton.setBounds (tb.removeFromLeft (bw)); tb.removeFromLeft (4);
@@ -955,10 +979,11 @@ void NecronamAudioProcessorEditor::resized()
             qualitySlider.setBounds (m.removeFromTop (22));
         }
         {
+            // SAG fills its whole block — one big, substantial knob.
             auto sg = sagArea.reduced (14);
-            sg.removeFromTop (22);
-            sg.removeFromTop (16);
-            sagKnob->setBounds (sg.removeFromTop (110).reduced (juce::jmax (0, (sg.getWidth() - 120) / 2), 0));
+            sg.removeFromTop (22);               // section title
+            sg.removeFromTop (16);               // knob label room
+            sagKnob->setBounds (sg.reduced (4));
         }
         {
             auto cb = cabArea.reduced (14);
@@ -986,16 +1011,18 @@ void NecronamAudioProcessorEditor::resized()
     }
 
     // ===== POST tab =====
+    // Strict chain order: EQ -> Flesh Render (full width, big knobs like the
+    // PRE version) -> compressor + filters sharing the bottom row.
     {
         auto a = bodyArea;
-        eqArea = a.removeFromTop (180);
+        eqArea = a.removeFromTop (170);
         a.removeFromTop (12);
-        auto row2 = a.removeFromTop (200);
-        compArea = row2.removeFromLeft (300);
-        row2.removeFromLeft (12);
-        postSatArea = row2;
+        postSatArea = a.removeFromTop (216);
         a.removeFromTop (12);
-        filterArea = a;
+        auto row3 = a;
+        compArea = row3.removeFromLeft (380);
+        row3.removeFromLeft (12);
+        filterArea = row3;
 
         {
             auto e = eqArea.reduced (14);
@@ -1007,26 +1034,29 @@ void NecronamAudioProcessorEditor::resized()
             for (int i = 0; i < n; ++i)
                 eqSliders[(size_t) i]->setBounds (e.removeFromLeft (sw).reduced (6, 2));
         }
-        {
-            auto cp = compArea.reduced (14);
-            compToggle->setBounds (cp.removeFromTop (24).removeFromRight (70));
-            cp.removeFromTop (18);
-            grMeter.setBounds (cp.removeFromRight (44).reduced (0, 8));
-            cp.removeFromRight (10);
-            compKnob->setBounds (cp.removeFromTop (110));
-        }
         layoutFR (postSatArea, satKnobs, *satToggle, *satXLowKnob, *satXHighKnob);
         {
+            auto cp = compArea.reduced (14);
+            compToggle->setBounds (cp.removeFromTop (22).removeFromRight (70));
+            cp.removeFromTop (16);
+            grMeter.setBounds (cp.removeFromRight (44).reduced (0, 6));
+            cp.removeFromRight (10);
+            auto knobRow = cp.removeFromTop (100);
+            const int kw = knobRow.getWidth() / 2;
+            compKnob->setBounds     (knobRow.removeFromLeft (kw).reduced (4, 0));
+            compGainKnob->setBounds (knobRow.reduced (4, 0));
+        }
+        {
             auto fa = filterArea.reduced (14);
-            fa.removeFromTop (22);
+            fa.removeFromTop (20);
             const int half = fa.getWidth() / 2;
             auto left = fa.removeFromLeft (half);
             auto right = fa;
-            left.removeFromTop (16);
-            hpfKnob->setBounds (left.removeFromTop (84).reduced (juce::jmax (0, (left.getWidth() - 110) / 2), 0));
+            left.removeFromTop (14);
+            hpfKnob->setBounds (left.removeFromTop (72).reduced (juce::jmax (0, (left.getWidth() - 100) / 2), 0));
             hpfToggle->setBounds (left.removeFromTop (24).withSizeKeepingCentre (100, 24));
-            right.removeFromTop (16);
-            lpfKnob->setBounds (right.removeFromTop (84).reduced (juce::jmax (0, (right.getWidth() - 110) / 2), 0));
+            right.removeFromTop (14);
+            lpfKnob->setBounds (right.removeFromTop (72).reduced (juce::jmax (0, (right.getWidth() - 100) / 2), 0));
             lpfToggle->setBounds (right.removeFromTop (24).withSizeKeepingCentre (100, 24));
         }
     }

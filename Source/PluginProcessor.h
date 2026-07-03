@@ -164,9 +164,14 @@ public:
         static constexpr auto eqActive     = "eq_active";
         // eq_0 .. eq_9 generated.
 
-        // LA-2A style compressor
+        // LA-2A style compressor (traditional two-knob front panel)
         static constexpr auto compActive   = "comp_active";
         static constexpr auto compAmount   = "comp_amount";    // Peak Reduction 0..100
+        static constexpr auto compGain     = "comp_gain";      // manual make-up gain (dB)
+
+        // Solo Amp/Cab: temporarily bypasses every effect module except the
+        // amp stage, sag and cab IR (the AMP/CAB tab's modules).
+        static constexpr auto soloAmpCab   = "solo_ampcab";
 
         // Flesh Render POST
         static constexpr auto satActive    = "sat_active";
@@ -296,8 +301,9 @@ private:
     bool mGateWasActive     = false;
     bool mPostSatWasActive  = false;
 
-    // ----- Tuner capture ring --------------------------------------------------
-    static constexpr int kTunerRing = 1 << 13;
+    // ----- Tuner capture ring (16384 ≈ 341 ms @ 48 kHz — low bass needs the
+    //       longer window) ------------------------------------------------------
+    static constexpr int kTunerRing = 1 << 14;
     std::array<float, (size_t) kTunerRing> mTunerRing {};
     std::atomic<int> mTunerWrite { 0 };
 

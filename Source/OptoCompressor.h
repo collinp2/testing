@@ -7,8 +7,8 @@
 //   * program-dependent optical time constants: ~10 ms attack; a two-stage
 //     release (a fast ~60 ms pool plus a slow multi-second "memory" pool)
 //   * gentle ~3:1 ratio with a very soft knee
-//   * a single PEAK REDUCTION control (drives the threshold down) and
-//     automatic make-up gain — no other knobs.
+//   * the traditional two-knob front panel: PEAK REDUCTION (drives the
+//     threshold down) and GAIN (manual make-up output gain).
 //
 //  Stereo-linked (max of both channels feeds one detector, one gain — keeps
 //  the image stable). Exposes the current gain reduction in dB for the meter.
@@ -35,11 +35,17 @@ public:
         mGRdB.store (0.0f);
     }
 
-    // peakReduction 0..100. Auto make-up is derived from the knob.
-    void process (float* L, float* R, int n, float peakReduction)
+    // peakReduction 0..100; makeup = the GAIN knob, as a linear factor.
+    void process (float* L, float* R, int n, float peakReduction, float makeup)
     {
         if (peakReduction <= 0.5f)
         {
+            // No compression — the GAIN knob still works as an output gain.
+            if (std::abs (makeup - 1.0f) > 1.0e-4f)
+            {
+                juce::FloatVectorOperations::multiply (L, makeup, n);
+                juce::FloatVectorOperations::multiply (R, makeup, n);
+            }
             mGRdB.store (0.0f);
             return;
         }
@@ -48,7 +54,6 @@ public:
         const float threshDb = -6.0f - k * 30.0f;            // -6 .. -36 dBFS
         const float ratio    = 3.0f;
         const float kneeDb   = 10.0f;
-        const float makeup   = juce::Decibels::decibelsToGain (k * 10.0f);  // auto make-up
 
         float maxGR = 0.0f;
 

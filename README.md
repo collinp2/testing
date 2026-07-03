@@ -31,8 +31,8 @@ MASTER INPUT LEVEL   (master strip, visible on every page, with IN meter)
   → CAB IR           mono:   dual-IR mixer on the stereo bus
                      stereo: Cab A → left only, Cab B → right only
   → API-560 GRAPHIC EQ
-  → LA-2A COMPRESSOR (one knob, auto make-up, GR meter)
   → FLESH RENDER POST (stereo, sweepable crossovers)
+  → LA-2A COMPRESSOR (Peak Reduction + Gain, GR meter)
   → hi-pass / low-pass filters
   → DELAY + REVERB   (order-switchable; reverb = Plate or Spring; true-bypass)
   → CLEAN DI BLEND
@@ -44,6 +44,11 @@ TUNER: taps the direct input; engaging it mutes the output.
 **Tabs:** `PRE` → `AMP / CAB` → `POST` → `FX` → `TUNER`, in chain order. The
 editor always opens on **AMP / CAB**. The **master strip** (input level + IN
 meter, output fader + meter, clean blend, output mode) is visible on every tab.
+
+**SOLO AMP/CAB** (tab bar, lights up vivid red): temporarily bypasses every
+effect module — gate, saturation, drive, low cut, EQ, compressor, filters,
+delay, reverb — leaving just amps → sag → cab, so you can audition the raw
+rig. The other tabs grey out while it's engaged.
 
 ## Stereo input mode (dual mono)
 
@@ -88,9 +93,10 @@ Linked across channels in mono mode, independent per side in stereo mode.
 
 ## LA-2A style compressor
 
-Post graphic EQ. One **Peak Reduction** knob (drives the threshold into a soft
-~3:1 knee), **auto make-up gain**, program-dependent two-stage optical release,
-stereo-linked, with a **gain-reduction meter**.
+After the post Flesh Render, before the final filters. The traditional
+two-knob front panel: **Peak Reduction** (drives the threshold into a soft
+~3:1 knee) and **Gain** (manual make-up, 0..+24 dB). Program-dependent
+two-stage optical release, stereo-linked, with a **gain-reduction meter**.
 
 ## Reverb & delay
 

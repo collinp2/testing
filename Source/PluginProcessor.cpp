@@ -208,6 +208,10 @@ APVTS::ParameterLayout NecronamAudioProcessor::createLayout()
     params.push_back (bParam (ParamID::compActive, "Compressor", false));
     params.push_back (fParam (ParamID::compAmount, "Peak Reduction", Range (0.0f, 100.0f, 0.5f), 30.0f,
                               [] (float v, int) { return juce::String (juce::roundToInt (v)); }));
+    params.push_back (fParam (ParamID::compGain, "Comp Gain", Range (0.0f, 24.0f, 0.1f), 0.0f, dbToText));
+
+    // ---- Solo Amp/Cab ----
+    params.push_back (bParam (ParamID::soloAmpCab, "Solo Amp/Cab", false));
 
     // ---- Post filters ----
     params.push_back (fParam (ParamID::hpfFreq, "Hi-Pass", Range (20.0f, 2000.0f, 1.0f, 0.3f), 20.0f, hzToText));
@@ -462,8 +466,11 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         return;
     }
 
+    // ---- Solo Amp/Cab: every effect module except amp / sag / cab bypasses.
+    const bool solo = raw (ParamID::soloAmpCab) > 0.5f;
+
     // ================= 2) GATE (detector on the direct signal) ==============
-    const bool gateOn   = raw (ParamID::gateActive) > 0.5f;
+    const bool gateOn   = raw (ParamID::gateActive) > 0.5f && ! solo;
     const int  gatePos  = (int) raw (ParamID::gatePosition);   // 0 = pre, 1 = post
     if (gateOn)
     {
@@ -501,7 +508,7 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
     // ================= 3) FLESH RENDER PRE ===================================
     {
-        const bool on = raw (ParamID::frontSatActive) > 0.5f;
+        const bool on = raw (ParamID::frontSatActive) > 0.5f && ! solo;
         if (on)
         {
             auto band = [&] (const char* b)
@@ -531,7 +538,7 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
     // ================= 4) DRIVE SECTION (switchable circuit) =================
     {
-        const bool on      = raw (ParamID::driveActive) > 0.5f;
+        const bool on      = raw (ParamID::driveActive) > 0.5f && ! solo;
         const int  circuit = (int) raw (ParamID::driveCircuit);
         if (on)
         {
@@ -565,7 +572,7 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     }
 
     // ================= 5) LOW CUT ============================================
-    if (raw (ParamID::lowCutActive) > 0.5f)
+    if (raw (ParamID::lowCutActive) > 0.5f && ! solo)
     {
         const float f = raw (ParamID::lowCutFreq);
         if (std::abs (f - mLowCutCachedFreq) > 0.5f)
@@ -786,7 +793,7 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         processMono (mDCBlocker[ch], busCh[ch]);
 
     // ================= 9) GRAPHIC EQ =========================================
-    if (raw (ParamID::eqActive) > 0.5f)
+    if (raw (ParamID::eqActive) > 0.5f && ! solo)
     {
         for (int i = 0; i < Api560EQ::kNumBands; ++i)
         {
@@ -798,19 +805,9 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         mEQ[1].process (busR, numSamples);
     }
 
-    // ================= 10) LA-2A COMPRESSOR ==================================
+    // ================= 10) FLESH RENDER POST =================================
     {
-        const bool on = raw (ParamID::compActive) > 0.5f;
-        if (on)
-            mComp.process (busL, busR, numSamples, raw (ParamID::compAmount));
-        else if (mCompWasActive)
-            mComp.reset();
-        mCompWasActive = on;
-    }
-
-    // ================= 11) FLESH RENDER POST =================================
-    {
-        const bool on = raw (ParamID::satActive) > 0.5f;
+        const bool on = raw (ParamID::satActive) > 0.5f && ! solo;
         if (on)
         {
             auto band = [&] (const char* b)
@@ -838,8 +835,19 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         mPostSatWasActive = on;
     }
 
+    // ================= 11) LA-2A COMPRESSOR (post Flesh Render) =============
+    {
+        const bool on = raw (ParamID::compActive) > 0.5f && ! solo;
+        if (on)
+            mComp.process (busL, busR, numSamples, raw (ParamID::compAmount),
+                           juce::Decibels::decibelsToGain (raw (ParamID::compGain)));
+        else if (mCompWasActive)
+            mComp.reset();
+        mCompWasActive = on;
+    }
+
     // ================= 12) POST FILTERS ======================================
-    if (raw (ParamID::hpfActive) > 0.5f)
+    if (raw (ParamID::hpfActive) > 0.5f && ! solo)
     {
         const float f = raw (ParamID::hpfFreq);
         if (std::abs (f - mHpfCachedFreq) > 0.5f)
@@ -852,7 +860,7 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         for (int ch = 0; ch < 2; ++ch)
             processMono (mHPF[ch], busCh[ch]);
     }
-    if (raw (ParamID::lpfActive) > 0.5f)
+    if (raw (ParamID::lpfActive) > 0.5f && ! solo)
     {
         const float f = raw (ParamID::lpfFreq);
         if (std::abs (f - mLpfCachedFreq) > 0.5f)
@@ -869,8 +877,8 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     // ================= 13) FX: DELAY + REVERB (order-switchable) ============
     {
         const int  order    = (int) raw (ParamID::fxOrder);
-        const bool delayOn  = raw (ParamID::delayActive)  > 0.5f;
-        const bool reverbOn = raw (ParamID::reverbActive) > 0.5f;
+        const bool delayOn  = raw (ParamID::delayActive)  > 0.5f && ! solo;
+        const bool reverbOn = raw (ParamID::reverbActive) > 0.5f && ! solo;
         const int  revType  = (int) raw (ParamID::reverbType);
 
         auto runDelay = [&]

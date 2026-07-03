@@ -25,6 +25,10 @@ namespace horror
     // Light tone for text/marks drawn on top of dark blood fills.
     inline constexpr juce::uint32 COL_BONE_LIGHT   = 0xFFEFEAE0;
 
+    // Vivid alarm red — used only for the SOLO AMP/CAB switch so its engaged
+    // state is unmissable against the muted palette.
+    inline constexpr juce::uint32 COL_SOLO         = 0xFFC2180E;
+
     // Warm grey for marble veins (matches reference vein tone).
     inline constexpr juce::uint32 COL_VEIN         = 0xFFA09990;
 

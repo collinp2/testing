@@ -33,15 +33,17 @@ public:
         if (std::abs (sampleRate - mHostSR) < 1.0)
             return;
         mHostSR = sampleRate;
-        // Decimate to ~12 kHz regardless of host rate.
-        mDecim  = juce::jmax (1, (int) std::round (sampleRate / 12000.0));
+        // Decimate to ~8 kHz regardless of host rate: a longer window in
+        // samples-of-analysis for the same capture, which is what low bass
+        // needs (more periods in view), and cheaper YIN.
+        mDecim  = juce::jmax (1, (int) std::round (sampleRate / 8000.0));
         mSR     = sampleRate / (double) mDecim;
 
-        // Two cascaded one-pole low-passes at ~2.4 kHz for anti-aliasing —
-        // crude but fine, since we only track pitch below 1.2 kHz.
-        const double fc = 2400.0;
+        // Three cascaded one-pole low-passes at ~1.8 kHz for anti-aliasing —
+        // we only track pitch below 1.2 kHz.
+        const double fc = 1800.0;
         mLpCoef = (float) std::exp (-2.0 * juce::MathConstants<double>::pi * fc / sampleRate);
-        mLp1 = mLp2 = 0.0f;
+        mLp1 = mLp2 = mLp3 = 0.0f;
     }
 
     // Analyse a mono window (length n, at the HOST rate). Returns Hz or 0.
@@ -57,8 +59,9 @@ public:
         {
             mLp1 = x[i] + (mLp1 - x[i]) * mLpCoef;
             mLp2 = mLp1 + (mLp2 - mLp1) * mLpCoef;
+            mLp3 = mLp2 + (mLp3 - mLp2) * mLpCoef;
             if (i % mDecim == 0)
-                mDec.push_back (mLp2);
+                mDec.push_back (mLp3);
         }
 
         const int W = (int) mDec.size();
@@ -104,8 +107,8 @@ public:
                 : 1.0f;
         }
 
-        // ---- Absolute threshold: FIRST dip below threshold (not global max —
-        //      this is the anti-octave-error part), refined to its local min.
+        // ---- Absolute threshold: FIRST dip below threshold, refined to its
+        //      local min (classic YIN anti-octave-error rule).
         constexpr float kThreshold = 0.15f;
         int tauEst = -1;
         for (int tau = tauMin + 1; tau < tauMax; ++tau)
@@ -118,14 +121,31 @@ public:
                 break;
             }
         }
+
+        // Global minimum (used both as fallback and for the bass octave guard).
+        int   tauG  = -1;
+        float bestG = 1.0f;
+        for (int tau = tauMin + 1; tau < tauMax; ++tau)
+            if (mCmndf[(size_t) tau] < bestG) { bestG = mCmndf[(size_t) tau]; tauG = tau; }
+
         if (tauEst < 0)
         {
-            // No dip under threshold: fall back to the global min if convincing.
-            float best = 1.0f;
-            for (int tau = tauMin + 1; tau < tauMax; ++tau)
-                if (mCmndf[(size_t) tau] < best) { best = mCmndf[(size_t) tau]; tauEst = tau; }
-            if (tauEst < 0 || best > 0.30f)
+            if (tauG < 0 || bestG > 0.30f)
                 return fail();
+            tauEst = tauG;
+        }
+        // ---- Bass octave guard ----
+        // Plucked bass often has a 2nd harmonic strong enough that the FIRST
+        // dip sits at T/2 (an octave high). If the deepest dip lies at ~an
+        // integer multiple of the first dip's lag AND is clearly deeper, the
+        // first dip was a harmonic — take the longer (lower) period.
+        else if (tauG > tauEst + 2)
+        {
+            const double ratio = (double) tauG / (double) tauEst;
+            const double frac  = std::abs (ratio - std::round (ratio));
+            if (ratio >= 1.8 && ratio <= 4.2 && frac < 0.15
+                && bestG + 0.04f < mCmndf[(size_t) tauEst])
+                tauEst = tauG;
         }
 
         mConfidence = 1.0f - mCmndf[(size_t) tauEst];
@@ -154,9 +174,9 @@ private:
     static constexpr double kMinFreq = 25.0;     // below 5-string low B (30.9 Hz)
     static constexpr double kMaxFreq = 1200.0;
 
-    double mHostSR = 0.0, mSR = 12000.0;
-    int    mDecim  = 4;
-    float  mLpCoef = 0.0f, mLp1 = 0.0f, mLp2 = 0.0f;
+    double mHostSR = 0.0, mSR = 8000.0;
+    int    mDecim  = 6;
+    float  mLpCoef = 0.0f, mLp1 = 0.0f, mLp2 = 0.0f, mLp3 = 0.0f;
     float  mConfidence = 0.0f, mRms = 0.0f;
 
     std::vector<float> mDec, mDiff, mCmndf;

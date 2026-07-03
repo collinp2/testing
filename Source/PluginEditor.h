@@ -101,6 +101,12 @@ private:
                      tabTunerButton { "TUNER" };
     int currentTab = TabAmpCab;
 
+    // Solo Amp/Cab: bright switch in the tab bar; while on, every effect
+    // module except the amp/sag/cab is bypassed and the other tabs grey out.
+    juce::TextButton soloButton { "SOLO AMP/CAB" };
+    std::unique_ptr<ButtonAttach> soloAttach;
+    bool lastSolo = false;
+
     // ---- Master strip (persistent, all pages) ----
     juce::Slider     masterFader;
     juce::Slider     cleanKnob;
@@ -173,6 +179,7 @@ private:
 
     juce::TextButton* compToggle = nullptr;
     juce::Slider* compKnob = nullptr;
+    juce::Slider* compGainKnob = nullptr;
     GainReductionMeter grMeter;
 
     juce::TextButton* satToggle = nullptr;
