@@ -149,6 +149,11 @@ public:
         static constexpr auto ampSpread    = "amp_spread";
         static constexpr auto ampAActive   = "amp_a_active";
         static constexpr auto ampBActive   = "amp_b_active";
+        // Mute = kill switch, not bypass: an engaged-but-muted amp outputs
+        // silence at its point in the chain (a bypassed amp is routed around,
+        // so its mute is moot).
+        static constexpr auto ampAMute     = "amp_a_mute";
+        static constexpr auto ampBMute     = "amp_b_mute";
         static constexpr auto quality      = "quality";
 
         // Sag
@@ -157,6 +162,8 @@ public:
         // Dual cab
         static constexpr auto cabAActive   = "cab_a_active";
         static constexpr auto cabBActive   = "cab_b_active";
+        static constexpr auto cabAMute     = "cab_a_mute";     // kill switch (see amp mutes)
+        static constexpr auto cabBMute     = "cab_b_mute";
         static constexpr auto cabALevel    = "cab_a_level";
         static constexpr auto cabBLevel    = "cab_b_level";
 

@@ -183,6 +183,8 @@ APVTS::ParameterLayout NecronamAudioProcessor::createLayout()
     params.push_back (fParam (ParamID::ampSpread, "Amp Spread", Range (0.0f, 1.0f, 0.01f), 0.5f, pctToText));
     params.push_back (bParam (ParamID::ampAActive, "Amp A", true));
     params.push_back (bParam (ParamID::ampBActive, "Amp B", true));
+    params.push_back (bParam (ParamID::ampAMute, "Amp A Mute", false));
+    params.push_back (bParam (ParamID::ampBMute, "Amp B Mute", false));
 
     // ---- Sag ----
     params.push_back (fParam (ParamID::sagAmount, "Sag", Range (0.0f, 10.0f, 0.1f), 0.0f,
@@ -191,6 +193,8 @@ APVTS::ParameterLayout NecronamAudioProcessor::createLayout()
     // ---- Dual cab ----
     params.push_back (bParam (ParamID::cabAActive, "Cab A", false));
     params.push_back (bParam (ParamID::cabBActive, "Cab B", false));
+    params.push_back (bParam (ParamID::cabAMute, "Cab A Mute", false));
+    params.push_back (bParam (ParamID::cabBMute, "Cab B Mute", false));
     params.push_back (fParam (ParamID::cabALevel, "Cab A Level", Range (-40.0f, 12.0f, 0.1f), 0.0f, dbToText));
     params.push_back (fParam (ParamID::cabBLevel, "Cab B Level", Range (-40.0f, 12.0f, 0.1f), 0.0f, dbToText));
 
@@ -591,6 +595,10 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     const float levelB = juce::Decibels::decibelsToGain (raw (ParamID::ampBLevel));
     const bool aActive = raw (ParamID::ampAActive) > 0.5f;
     const bool bActive = raw (ParamID::ampBActive) > 0.5f;
+    // Mutes are kill switches: the amp keeps processing (state stays warm for a
+    // seamless un-mute) but its output is silenced at this point in the chain.
+    const bool muteA   = raw (ParamID::ampAMute) > 0.5f;
+    const bool muteB   = raw (ParamID::ampBMute) > 0.5f;
 
     float* aOut = mAmpAOut.getWritePointer (0);
     float* bOut = mAmpBOut.getWritePointer (0);
@@ -613,6 +621,7 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             runAmp (mAmp[0], lane0, aOut);
             juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);
             juce::FloatVectorOperations::copy (busL, aOut, numSamples);
+            if (muteA) juce::FloatVectorOperations::clear (busL, numSamples);
         }
         else
             juce::FloatVectorOperations::copy (busL, lane0, numSamples);
@@ -622,6 +631,7 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             runAmp (mAmp[1], lane1, bOut);
             juce::FloatVectorOperations::multiply (bOut, levelB, numSamples);
             juce::FloatVectorOperations::copy (busR, bOut, numSamples);
+            if (muteB) juce::FloatVectorOperations::clear (busR, numSamples);
         }
         else
             juce::FloatVectorOperations::copy (busR, lane1, numSamples);
@@ -637,6 +647,7 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             {
                 runAmp (mAmp[0], mono, aOut);
                 juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);
+                if (muteA) juce::FloatVectorOperations::clear (aOut, numSamples);
                 juce::FloatVectorOperations::copy (busL, aOut, numSamples);
                 juce::FloatVectorOperations::copy (busR, aOut, numSamples);
             }
@@ -648,17 +659,21 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         }
         else if (routing == Routing::Series)
         {
+            // A muted amp stops the chain at its point: the next stage
+            // receives silence.
             float* sig = mono;
             if (aActive)
             {
                 runAmp (mAmp[0], sig, aOut);
                 juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);
+                if (muteA) juce::FloatVectorOperations::clear (aOut, numSamples);
                 sig = aOut;
             }
             if (bActive)
             {
                 runAmp (mAmp[1], sig, bOut);
                 juce::FloatVectorOperations::multiply (bOut, levelB, numSamples);
+                if (muteB) juce::FloatVectorOperations::clear (bOut, numSamples);
                 sig = bOut;
             }
             juce::FloatVectorOperations::copy (busL, sig, numSamples);
@@ -672,6 +687,8 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 runAmp (mAmp[1], mono, bOut);
                 juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);
                 juce::FloatVectorOperations::multiply (bOut, levelB, numSamples);
+                if (muteA) juce::FloatVectorOperations::clear (aOut, numSamples);
+                if (muteB) juce::FloatVectorOperations::clear (bOut, numSamples);
 
                 const float spread = raw (ParamID::ampSpread);
                 float gAL, gAR, gBL, gBR;
@@ -685,11 +702,13 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             }
             else if (aActive || bActive)
             {
-                const int   ai  = aActive ? 0 : 1;
-                float*      out = aActive ? aOut : bOut;
-                const float lvl = aActive ? levelA : levelB;
+                const int   ai   = aActive ? 0 : 1;
+                float*      out  = aActive ? aOut : bOut;
+                const float lvl  = aActive ? levelA : levelB;
+                const bool  mute = aActive ? muteA : muteB;
                 runAmp (mAmp[ai], mono, out);
                 juce::FloatVectorOperations::multiply (out, lvl, numSamples);
+                if (mute) juce::FloatVectorOperations::clear (out, numSamples);
                 juce::FloatVectorOperations::copy (busL, out, numSamples);
                 juce::FloatVectorOperations::copy (busR, out, numSamples);
             }
@@ -719,8 +738,13 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
     // ================= 8) CAB IR =============================================
     {
-        const bool aOn = raw (ParamID::cabAActive) > 0.5f && mCab[0].loaded.load();
-        const bool bOn = raw (ParamID::cabBActive) > 0.5f && mCab[1].loaded.load();
+        const bool aOn      = raw (ParamID::cabAActive) > 0.5f && mCab[0].loaded.load();
+        const bool bOn      = raw (ParamID::cabBActive) > 0.5f && mCab[1].loaded.load();
+        // Cab mutes are kill switches: an engaged-but-muted cab's branch goes
+        // silent (mono: contributes nothing to the mix — sole engaged cab muted
+        // means silence, not dry; stereo: that channel dies at the cab point).
+        const bool muteCabA = raw (ParamID::cabAMute) > 0.5f;
+        const bool muteCabB = raw (ParamID::cabBMute) > 0.5f;
 
         auto convolveCab = [&] (int c) -> const float*   // returns scratch chans
         {
@@ -745,17 +769,27 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
             if (aOn)
             {
-                convolveCab (0);
-                juce::FloatVectorOperations::copyWithMultiply (
-                    sumL, mCabScratch.getReadPointer (0),
-                    juce::Decibels::decibelsToGain (raw (ParamID::cabALevel)), numSamples);
+                if (muteCabA)
+                    juce::FloatVectorOperations::clear (sumL, numSamples);
+                else
+                {
+                    convolveCab (0);
+                    juce::FloatVectorOperations::copyWithMultiply (
+                        sumL, mCabScratch.getReadPointer (0),
+                        juce::Decibels::decibelsToGain (raw (ParamID::cabALevel)), numSamples);
+                }
             }
             if (bOn)
             {
-                convolveCab (1);
-                juce::FloatVectorOperations::copyWithMultiply (
-                    sumR, mCabScratch.getReadPointer (1),
-                    juce::Decibels::decibelsToGain (raw (ParamID::cabBLevel)), numSamples);
+                if (muteCabB)
+                    juce::FloatVectorOperations::clear (sumR, numSamples);
+                else
+                {
+                    convolveCab (1);
+                    juce::FloatVectorOperations::copyWithMultiply (
+                        sumR, mCabScratch.getReadPointer (1),
+                        juce::Decibels::decibelsToGain (raw (ParamID::cabBLevel)), numSamples);
+                }
             }
             juce::FloatVectorOperations::copy (busL, sumL, numSamples);
             juce::FloatVectorOperations::copy (busR, sumR, numSamples);
@@ -767,14 +801,14 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             float* sumL = mCabSum.getWritePointer (0);
             float* sumR = mCabSum.getWritePointer (1);
 
-            if (aOn)
+            if (aOn && ! muteCabA)
             {
                 convolveCab (0);
                 const float g = juce::Decibels::decibelsToGain (raw (ParamID::cabALevel));
                 juce::FloatVectorOperations::addWithMultiply (sumL, mCabScratch.getReadPointer (0), g, numSamples);
                 juce::FloatVectorOperations::addWithMultiply (sumR, mCabScratch.getReadPointer (1), g, numSamples);
             }
-            if (bOn)
+            if (bOn && ! muteCabB)
             {
                 convolveCab (1);
                 const float g = juce::Decibels::decibelsToGain (raw (ParamID::cabBLevel));

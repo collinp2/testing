@@ -160,6 +160,8 @@ private:
     juce::Slider* ampOutKnob = nullptr;
     juce::TextButton* ampAToggle = nullptr;
     juce::TextButton* ampBToggle = nullptr;
+    juce::TextButton* ampAMuteToggle = nullptr;
+    juce::TextButton* ampBMuteToggle = nullptr;
     juce::Slider qualitySlider;
 
     juce::Slider* sagKnob = nullptr;
@@ -170,6 +172,8 @@ private:
     juce::Label      irBNameLabel { {}, "(no IR)" };
     juce::TextButton* cabAToggle = nullptr;
     juce::TextButton* cabBToggle = nullptr;
+    juce::TextButton* cabAMuteToggle = nullptr;
+    juce::TextButton* cabBMuteToggle = nullptr;
     juce::Slider* cabALevelKnob = nullptr;
     juce::Slider* cabBLevelKnob = nullptr;
 

@@ -186,6 +186,11 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     ampOutKnob    = &addKnob (TabAmpCab, ID::namOutput,  "AMP OUT");
     ampAToggle    = &addToggle (TabAmpCab, ID::ampAActive, "On");
     ampBToggle    = &addToggle (TabAmpCab, ID::ampBActive, "On");
+    // Mute = kill switch (lights vivid red like the solo button).
+    ampAMuteToggle = &addToggle (TabAmpCab, ID::ampAMute, "M");
+    ampBMuteToggle = &addToggle (TabAmpCab, ID::ampBMute, "M");
+    ampAMuteToggle->getProperties().set ("bright", true);
+    ampBMuteToggle->getProperties().set ("bright", true);
 
     qualitySlider.setSliderStyle (juce::Slider::LinearHorizontal);
     qualitySlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 104, 18);
@@ -214,8 +219,12 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
         addAndMakeVisible (*l);
         assignTab (*l, TabAmpCab);
     }
-    cabAToggle    = &addToggle (TabAmpCab, ID::cabAActive, "A On");
-    cabBToggle    = &addToggle (TabAmpCab, ID::cabBActive, "B On");
+    cabAToggle    = &addToggle (TabAmpCab, ID::cabAActive, "On");
+    cabBToggle    = &addToggle (TabAmpCab, ID::cabBActive, "On");
+    cabAMuteToggle = &addToggle (TabAmpCab, ID::cabAMute, "M");
+    cabBMuteToggle = &addToggle (TabAmpCab, ID::cabBMute, "M");
+    cabAMuteToggle->getProperties().set ("bright", true);
+    cabBMuteToggle->getProperties().set ("bright", true);
     cabALevelKnob = &addHSlider (TabAmpCab, ID::cabALevel);
     cabBLevelKnob = &addHSlider (TabAmpCab, ID::cabBLevel);
 
@@ -543,8 +552,8 @@ void NecronamAudioProcessorEditor::timerCallback()
     };
     for (juce::Component* comp : { (juce::Component*) ampBLevelKnob, (juce::Component*) &loadModelBButton,
                                    (juce::Component*) &clearModelBButton, (juce::Component*) &modelBNameLabel,
-                                   (juce::Component*) ampBToggle, (juce::Component*) &prevBButton,
-                                   (juce::Component*) &nextBButton })
+                                   (juce::Component*) ampBToggle, (juce::Component*) ampBMuteToggle,
+                                   (juce::Component*) &prevBButton, (juce::Component*) &nextBButton })
         setEn (*comp, bUsed);
     setEn (*spreadKnob, spreadUsed);
     setEn (routingBox, routingUsed);
@@ -948,6 +957,7 @@ void NecronamAudioProcessorEditor::resized()
             prevAButton.setBounds (rowA.removeFromLeft (22)); rowA.removeFromLeft (2);
             nextAButton.setBounds (rowA.removeFromLeft (22)); rowA.removeFromLeft (6);
             clearModelAButton.setBounds (rowA.removeFromRight (24)); rowA.removeFromRight (4);
+            ampAMuteToggle->setBounds (rowA.removeFromRight (30)); rowA.removeFromRight (4);
             ampAToggle->setBounds (rowA.removeFromRight (40)); rowA.removeFromRight (4);
             modelANameLabel.setBounds (rowA);
             m.removeFromTop (5);
@@ -956,6 +966,7 @@ void NecronamAudioProcessorEditor::resized()
             prevBButton.setBounds (rowB.removeFromLeft (22)); rowB.removeFromLeft (2);
             nextBButton.setBounds (rowB.removeFromLeft (22)); rowB.removeFromLeft (6);
             clearModelBButton.setBounds (rowB.removeFromRight (24)); rowB.removeFromRight (4);
+            ampBMuteToggle->setBounds (rowB.removeFromRight (30)); rowB.removeFromRight (4);
             ampBToggle->setBounds (rowB.removeFromRight (40)); rowB.removeFromRight (4);
             modelBNameLabel.setBounds (rowB);
 
@@ -994,19 +1005,20 @@ void NecronamAudioProcessorEditor::resized()
             auto blockB = cb;
 
             auto irBlock = [] (juce::Rectangle<int> block, juce::TextButton& load, juce::TextButton& clear,
-                               juce::TextButton& on, juce::Label& name, juce::Slider& level)
+                               juce::TextButton& on, juce::TextButton& mute, juce::Label& name, juce::Slider& level)
             {
                 block.removeFromTop (14);            // CAB A/B caption (painted)
                 auto top = block.removeFromTop (26);
                 load.setBounds (top.removeFromLeft (100)); top.removeFromLeft (6);
                 clear.setBounds (top.removeFromLeft (26)); top.removeFromLeft (8);
-                on.setBounds (top.removeFromLeft (54));    top.removeFromLeft (8);
+                on.setBounds (top.removeFromLeft (44));    top.removeFromLeft (4);
+                mute.setBounds (top.removeFromLeft (30));  top.removeFromLeft (8);
                 name.setBounds (top);
                 block.removeFromTop (8);
                 level.setBounds (block.removeFromTop (22));
             };
-            irBlock (blockA, loadIRAButton, clearIRAButton, *cabAToggle, irANameLabel, *cabALevelKnob);
-            irBlock (blockB, loadIRBButton, clearIRBButton, *cabBToggle, irBNameLabel, *cabBLevelKnob);
+            irBlock (blockA, loadIRAButton, clearIRAButton, *cabAToggle, *cabAMuteToggle, irANameLabel, *cabALevelKnob);
+            irBlock (blockB, loadIRBButton, clearIRBButton, *cabBToggle, *cabBMuteToggle, irBNameLabel, *cabBLevelKnob);
         }
     }
 
