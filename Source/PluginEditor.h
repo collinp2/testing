@@ -127,7 +127,7 @@ private:
     juce::Slider     cleanKnob;
     juce::ComboBox   outputModeBox;
     std::unique_ptr<ComboAttach> outputModeAttach;
-    LevelMeter       inMeter, namOutMeter, masterMeter;
+    LevelMeter       inMeter, ampInMeter, namOutMeter, masterMeter;
     juce::Slider*    inputKnob = nullptr;          // master input level (chain start)
     juce::Slider*    diAlignKnob = nullptr;        // clean-blend DI alignment
 
@@ -174,7 +174,7 @@ private:
     juce::Slider* spreadKnob = nullptr;
     juce::Slider* ampALevelKnob = nullptr;
     juce::Slider* ampBLevelKnob = nullptr;
-    juce::Slider* inputCalKnob = nullptr;
+    juce::Slider* ampInKnob = nullptr;      // trim into the NAM models (was IN CAL)
     juce::Slider* ampOutKnob = nullptr;
     juce::TextButton* ampAToggle = nullptr;
     juce::TextButton* ampBToggle = nullptr;

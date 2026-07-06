@@ -174,7 +174,17 @@ in stereo mode):
 - **Raw** — output gain only.
 - **Normalized** — targets ~−18 dBFS using the model's embedded loudness.
 - **Calibrated** — reproduces real-world levels using the model's input/output
-  dBu calibration and your interface's input-calibration value ("IN CAL").
+  dBu calibration, referenced to a fixed 12 dBu interface level. (Only models
+  that embed calibration metadata respond; most don't.)
+
+## AMP IN / AMP OUT
+
+**AMP IN** trims the level hitting the NAM models — *after* the whole PRE
+section — so a hot saturation/drive chain can be pulled back (or a quiet one
+pushed) without touching the plugin's input gain staging. The **IN meter**
+beside the amp panel's OUT meter shows exactly what the models see (NAM models
+are level-sensitive, so this is the meter to watch when setting it). **AMP
+OUT** trims the amp bus after the models.
 
 ## Building
 

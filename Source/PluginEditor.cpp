@@ -87,10 +87,12 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     outputModeAttach = std::make_unique<ComboAttach> (processor.apvts, ID::outputMode, outputModeBox);
 
     inMeter.caption     = "IN";
+    ampInMeter.caption  = "IN";
     namOutMeter.caption = "OUT";
     masterMeter.caption = "OUT";
     content.addAndMakeVisible (inMeter);                       // master strip (persistent)
     content.addAndMakeVisible (masterMeter);
+    content.addAndMakeVisible (ampInMeter);  assignTab (ampInMeter,  TabAmpCab);
     content.addAndMakeVisible (namOutMeter); assignTab (namOutMeter, TabAmpCab);
 
     // =====================================================================
@@ -185,7 +187,7 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     spreadKnob    = &addKnob (TabAmpCab, ID::ampSpread,  "SPREAD");
     ampALevelKnob = &addKnob (TabAmpCab, ID::ampALevel,  "AMP A");
     ampBLevelKnob = &addKnob (TabAmpCab, ID::ampBLevel,  "AMP B");
-    inputCalKnob  = &addKnob (TabAmpCab, ID::inputCal,   "IN CAL");
+    ampInKnob     = &addKnob (TabAmpCab, ID::ampInput,   "AMP IN");
     ampOutKnob    = &addKnob (TabAmpCab, ID::namOutput,  "AMP OUT");
     ampAToggle    = &addToggle (TabAmpCab, ID::ampAActive, "On");
     ampBToggle    = &addToggle (TabAmpCab, ID::ampBActive, "On");
@@ -540,6 +542,7 @@ void NecronamAudioProcessorEditor::refreshDriveVisibility()
 void NecronamAudioProcessorEditor::timerCallback()
 {
     inMeter.update     (processor.fetchInputPeak());
+    ampInMeter.update  (processor.fetchAmpInPeak());
     namOutMeter.update (processor.fetchNamPeak());
     masterMeter.update (processor.fetchMasterPeak());
     grMeter.update     (processor.fetchGainReductionDb());
@@ -823,7 +826,7 @@ void NecronamAudioProcessorEditor::paintContent (juce::Graphics& g)
     // Footer.
     g.setColour (c (COL_BONE));
     g.setFont (monoFont (10.0f));
-    g.drawText ("CP SOFTWARE  -  NECRONAM MAX v2.1  -  NEURAL AMP NECROMANCY",
+    g.drawText ("CP SOFTWARE  -  NECRONAM MAX v2.2  -  NEURAL AMP NECROMANCY",
                 juce::Rectangle<int> (0, kBaseH - 26, w, 22), juce::Justification::centred);
 
     HorrorLookAndFeel::drawGrainTexture (g, juce::Rectangle<int> (0, 0, kBaseW, kBaseH));
@@ -1012,9 +1015,12 @@ void NecronamAudioProcessorEditor::layoutContent()
             auto m = ampModelsArea.reduced (14);
             m.removeFromTop (22);
 
-            auto meterStrip = m.removeFromRight (34);
+            auto meterStrip = m.removeFromRight (60);
             meterStrip.removeFromTop (2);
-            namOutMeter.setBounds (meterStrip.removeFromTop (150));
+            auto meters = meterStrip.removeFromTop (150);
+            ampInMeter.setBounds (meters.removeFromLeft (27));   // what the models see
+            meters.removeFromLeft (6);
+            namOutMeter.setBounds (meters);
             m.removeFromRight (10);
 
             auto rowA = m.removeFromTop (26);
@@ -1051,7 +1057,7 @@ void NecronamAudioProcessorEditor::layoutContent()
             ampBLevelKnob->setBounds (knobRow.removeFromLeft (kw).reduced (3, 0));
             ampAAlignKnob->setBounds (knobRow.removeFromLeft (kw).reduced (3, 0));
             ampBAlignKnob->setBounds (knobRow.removeFromLeft (kw).reduced (3, 0));
-            inputCalKnob->setBounds  (knobRow.removeFromLeft (kw).reduced (3, 0));
+            ampInKnob->setBounds     (knobRow.removeFromLeft (kw).reduced (3, 0));
             ampOutKnob->setBounds    (knobRow.reduced (3, 0));
 
             m.removeFromTop (6);

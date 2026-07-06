@@ -96,6 +96,7 @@ public:
 
     // Meter taps (peak since last read, linear). Read+reset from the editor.
     float fetchInputPeak()  { return mInPeak.exchange (0.0f); }
+    float fetchAmpInPeak()  { return mAmpInPeak.exchange (0.0f); }   // what the models see
     float fetchNamPeak()    { return mNamPeak.exchange (0.0f); }
     float fetchMasterPeak() { return mMasterPeak.exchange (0.0f); }
     // Compressor gain reduction (dB, peak since last read).
@@ -112,7 +113,11 @@ public:
         static constexpr auto namOutput    = "nam_output";     // amp-bus trim
         static constexpr auto outputLevel  = "output_level";
         static constexpr auto outputMode   = "output_mode";
-        static constexpr auto inputCal     = "input_cal";
+        // AMP IN: trim applied immediately before the NAM amps (after the whole
+        // PRE section) — pull back or push the level hitting the models without
+        // touching the plugin's input gain staging. Replaced the old IN CAL
+        // knob; Calibrated output mode now references a fixed 12 dBu.
+        static constexpr auto ampInput     = "amp_input";
         static constexpr auto cleanBlend   = "clean_blend";
         static constexpr auto inputMode    = "input_mode";     // Mono / Stereo (dual mono)
 
@@ -350,8 +355,13 @@ private:
 
     // Meter accumulators.
     std::atomic<float> mInPeak     { 0.0f };
+    std::atomic<float> mAmpInPeak  { 0.0f };
     std::atomic<float> mNamPeak    { 0.0f };
     std::atomic<float> mMasterPeak { 0.0f };
+
+    // Fixed interface reference for Calibrated output mode (dBu at 0 dBFS);
+    // was the IN CAL knob's default before it became the AMP IN trim.
+    static constexpr float kCalibrationRefDbu = 12.0f;
 
     double mSampleRate = 44100.0;
     int    mMaxBlock   = 512;

@@ -117,8 +117,7 @@ APVTS::ParameterLayout NecronamAudioProcessor::createLayout()
     params.push_back (fParam (ParamID::namOutput,   "Amp Output",   Range (-40.0f, 40.0f, 0.1f), 0.0f, dbToText));
     params.push_back (fParam (ParamID::outputLevel, "Output Level", Range (-40.0f, 40.0f, 0.1f), 0.0f, dbToText));
     params.push_back (cParam (ParamID::outputMode, "Output Mode", { "Raw", "Normalized", "Calibrated" }, 0));
-    params.push_back (fParam (ParamID::inputCal, "Input Calibration", Range (0.0f, 30.0f, 0.1f), 12.0f,
-                              [] (float v, int) { return juce::String (v, 1) + " dBu"; }));
+    params.push_back (fParam (ParamID::ampInput, "Amp Input", Range (-24.0f, 24.0f, 0.1f), 0.0f, dbToText));
     params.push_back (fParam (ParamID::cleanBlend, "Clean Blend", Range (0.0f, 1.0f, 0.001f), 0.0f, pctToText));
     params.push_back (fParam (ParamID::cleanAlign, "DI Align", Range (0.0f, 5.0f, 0.01f), 0.0f,
                               [] (float v, int) { return juce::String (v, 2) + " ms"; }));
@@ -340,6 +339,7 @@ void NecronamAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     }
 
     mInPeak.store (0.0f);
+    mAmpInPeak.store (0.0f);
     mNamPeak.store (0.0f);
     mMasterPeak.store (0.0f);
 
@@ -363,9 +363,8 @@ bool NecronamAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts)
 // ===========================================================================
 float NecronamAudioProcessor::computeOutputGain() const
 {
-    const int   mode     = (int) apvts.getRawParameterValue (ParamID::outputMode)->load();
-    const float outDb    = apvts.getRawParameterValue (ParamID::outputLevel)->load();
-    const float inputCal = apvts.getRawParameterValue (ParamID::inputCal)->load();
+    const int   mode  = (int) apvts.getRawParameterValue (ParamID::outputMode)->load();
+    const float outDb = apvts.getRawParameterValue (ParamID::outputLevel)->load();
 
     float gain = juce::Decibels::decibelsToGain (outDb);
 
@@ -373,7 +372,7 @@ float NecronamAudioProcessor::computeOutputGain() const
     if (mode == 1 && m != nullptr && m->HasLoudness())
         gain *= juce::Decibels::decibelsToGain (-18.0f - (float) m->GetLoudness());
     else if (mode == 2 && m != nullptr && m->HasOutputLevel())
-        gain *= juce::Decibels::decibelsToGain ((float) m->GetOutputLevel() - inputCal);
+        gain *= juce::Decibels::decibelsToGain ((float) m->GetOutputLevel() - kCalibrationRefDbu);
 
     return gain;
 }
@@ -465,16 +464,15 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     }
 
     // Input gain (+ calibrated alignment: lane 0 references Amp A; in stereo
-    // mode lane 1 references Amp B).
+    // mode lane 1 references Amp B; Calibrated mode references a fixed 12 dBu).
     const int   outMode  = (int) raw (ParamID::outputMode);
-    const float inputCal = raw (ParamID::inputCal);
     const float baseInDb = raw (ParamID::inputLevel);
     for (int ln = 0; ln < nLanes; ++ln)
     {
         float db = baseInDb;
         const auto& m = mAmp[inMode == InputMode::Stereo ? ln : 0].model;
         if (outMode == 2 && m != nullptr && m->HasInputLevel())
-            db += inputCal - (float) m->GetInputLevel();
+            db += kCalibrationRefDbu - (float) m->GetInputLevel();
         juce::FloatVectorOperations::multiply (ln == 0 ? lane0 : lane1,
                                                juce::Decibels::decibelsToGain (db), numSamples);
     }
@@ -643,6 +641,24 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         }
         for (int ln = 0; ln < nLanes; ++ln)
             processMono (mLowCut[ln], ln == 0 ? lane0 : lane1);
+    }
+
+    // ================= 5b) AMP IN trim ======================================
+    // Trim the level hitting the NAM models — after the whole PRE section, so
+    // a hot drive/saturation chain can be pulled back (or a quiet one pushed)
+    // without touching the plugin's input gain staging.
+    {
+        const float trimDb = raw (ParamID::ampInput);
+        if (std::abs (trimDb) > 0.01f)
+        {
+            const float g = juce::Decibels::decibelsToGain (trimDb);
+            for (int ln = 0; ln < nLanes; ++ln)
+                juce::FloatVectorOperations::multiply (ln == 0 ? lane0 : lane1, g, numSamples);
+        }
+        // Amp-input meter: what the models actually see (post trim).
+        float pk = blockPeak (lane0, numSamples);
+        if (nLanes == 2) pk = juce::jmax (pk, blockPeak (lane1, numSamples));
+        accumulatePeak (mAmpInPeak, pk);
     }
 
     // ================= 6) DUAL AMP STAGE -> stereo bus =======================

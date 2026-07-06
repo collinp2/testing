@@ -20,7 +20,7 @@ endif()
 #  CP Software. JUCE + NeuralAmpModelerCore.
 # ============================================================================
 
-project(NECRONAM_MAX VERSION 2.1.0 LANGUAGES C CXX)
+project(NECRONAM_MAX VERSION 2.2.0 LANGUAGES C CXX)
 
 # NAM core requires C++20; JUCE is happy with it too.
 set(CMAKE_CXX_STANDARD 20)
