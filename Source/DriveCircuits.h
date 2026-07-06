@@ -103,13 +103,21 @@ public:
         for (int i = 0; i < n; ++i)
         {
             const float dry = x[i];
-            // Only the >~720 Hz content is boosted into the clipper (mid-hump).
+            // Like the real op-amp stage: the full-range signal passes at unity
+            // into the clipper and only the >~720 Hz content gets the drive
+            // boost (that's the mid-hump). The HPF is FIRST-ORDER (a real RC),
+            // so low = dry - hp is its exact complement.
             float hp = dry;
             filt1 (mTsHpf[lane], hp);
+            const float low = dry - hp;
             float v = dry + hp * g;
             // Symmetric diode-style soft clip.
             v = std::tanh (v * 0.9f) * 1.1f;
-            x[i] = v * comp;
+            // Frequency-aware compensation: the auto level comp must not eat
+            // the unity-gain lows (the real pedal's LEVEL knob restores them
+            // alongside the clipped mids). Add the clean low path back in so
+            // bass stays at unity regardless of drive.
+            x[i] = v * comp + low * (1.0f - comp);
         }
 
         // Tone: first-order treble roll-off, swept by the tone knob.
@@ -156,7 +164,9 @@ private:
 
     void updateTsHpf()
     {
-        auto co = Coeffs::makeHighPass (mSR, 720.0);
+        // First-order, like the RC network in the real drive stage (and so
+        // that dry - hp is an exact complementary low path).
+        auto co = Coeffs::makeFirstOrderHighPass (mSR, 720.0);
         *mTsHpf[0].coefficients = *co;
         *mTsHpf[1].coefficients = *co;
     }

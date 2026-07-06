@@ -59,6 +59,25 @@ tracks in and get a unique amp + cab on each side. The whole pre chain (gate,
 saturation, drive, low cut) also runs per channel. In **Mono** mode the input
 is summed and the classic Single / Series / Parallel routing (+ Spread) applies.
 
+## Amp & cab utilities — On / Ø / M / ALIGN
+
+Every amp and cab slot has four utilities:
+
+- **On** — bypass. The block is routed around (Series: signal passes straight
+  to the next stage; Parallel: the branch drops out and the survivor
+  re-centres).
+- **Ø** — polarity invert.
+- **M** — mute, a true **kill switch** (lights vivid red): an engaged-but-muted
+  block outputs silence at its point in the chain — a muted sole cab means
+  silence, not dry.
+- **ALIGN** — a 0–5 ms micro-delay on the branch for phase alignment. Use it
+  (with Ø) to fix comb filtering when blending parallel amps or two cab IRs.
+
+The master strip's **Clean Blend** has a matching **DI ALIGN** knob that delays
+the clean DI to line up with the wet path (cab IRs carry a few ms of
+mic-distance onset delay) — kills the combing in clean blends, especially on
+bass.
+
 ## Drive section
 
 One circuit at a time (a true switch, not a blend):
@@ -66,9 +85,12 @@ One circuit at a time (a true switch, not a blend):
 - **TC Preamp** — inspired by the TC Electronic Integrated Preamplifier: a very
   clean FET front end that only folds over at extreme gain, plus an active
   Bass / Mid / Treble EQ and Level. Transparent, punchy colour.
-- **Tube Screamer** — the generic TS topology: only content above ~720 Hz is
-  boosted into a symmetric soft clipper (the classic mid-hump), then Tone
-  (treble roll-off) and Level.
+- **Tube Screamer** — the generic TS topology: the full-range signal passes at
+  unity into a symmetric soft clipper while only the content above ~720 Hz
+  (first-order, like the real RC) gets the drive boost — the classic mid-hump.
+  The level compensation is frequency-aware, so the unity-gain low end stays
+  at full strength no matter the drive (bass-friendly, unlike a stock TS clone
+  whose auto-levelling eats the bottom). Tone (treble roll-off) and Level.
 
 ## Flesh Render — front and output
 
@@ -83,6 +105,8 @@ revoices the three stages to be *realistic*:
   sustained.
 
 All three are level-compensated, so engaging a stage doesn't jump the volume.
+Each Flesh Render also has a **MIX** knob (wet/dry) for parallel, NY-style
+saturation — keep the clean body underneath and blend the grit in on top.
 
 ## Sag
 
@@ -112,6 +136,12 @@ The detector is **always keyed from the direct pre-amp signal**, and the
 **Position** switch chooses where the computed gain is applied: `Pre Amp`
 (classic, before the front end) or `Post Amp` (slams the amp's hiss too, while
 still tracking your dry playing).
+
+The **RELEASE** knob (0.1 ms – 500 ms) drives both the gain close time and the
+detector decay: at the minimum the gate slams shut within a few samples —
+lightning-fast, full modern-metal stutter. Built-in hysteresis (the close
+threshold sits 6 dB under the open threshold) keeps the fastest settings from
+chattering.
 
 ## Strobe tuner (guitar AND bass)
 

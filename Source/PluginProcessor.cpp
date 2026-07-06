@@ -120,12 +120,20 @@ APVTS::ParameterLayout NecronamAudioProcessor::createLayout()
     params.push_back (fParam (ParamID::inputCal, "Input Calibration", Range (0.0f, 30.0f, 0.1f), 12.0f,
                               [] (float v, int) { return juce::String (v, 1) + " dBu"; }));
     params.push_back (fParam (ParamID::cleanBlend, "Clean Blend", Range (0.0f, 1.0f, 0.001f), 0.0f, pctToText));
+    params.push_back (fParam (ParamID::cleanAlign, "DI Align", Range (0.0f, 5.0f, 0.01f), 0.0f,
+                              [] (float v, int) { return juce::String (v, 2) + " ms"; }));
     params.push_back (cParam (ParamID::inputMode, "Input Mode", { "Mono", "Stereo (Dual Mono)" }, 0));
 
     // ---- Gate ----
     params.push_back (fParam (ParamID::gateThresh, "Gate Threshold", Range (-100.0f, 0.0f, 0.5f), -80.0f, dbToText));
     params.push_back (bParam (ParamID::gateActive, "Gate", false));
     params.push_back (cParam (ParamID::gatePosition, "Gate Position", { "Pre Amp", "Post Amp" }, 0));
+    params.push_back (fParam (ParamID::gateRelease, "Gate Release", Range (0.1f, 500.0f, 0.1f, 0.3f), 100.0f,
+                              [] (float v, int)
+                              {
+                                  return v < 1.0f ? juce::String (v, 1) + " ms"
+                                                  : juce::String (juce::roundToInt (v)) + " ms";
+                              }));
 
     // ---- Quality (A2, shared) ----
     params.push_back (fParam (ParamID::quality, "Quality", Range (0.0f, 1.0f, 0.01f), 1.0f,
@@ -145,6 +153,7 @@ APVTS::ParameterLayout NecronamAudioProcessor::createLayout()
     params.push_back (bParam (ParamID::frontSatActive, "Front Saturation", false));
     params.push_back (fParam (ParamID::frontSatXLow,  "Front Xover Low",  Range (60.0f, 800.0f, 1.0f, 0.4f), 250.0f, hzToText));
     params.push_back (fParam (ParamID::frontSatXHigh, "Front Xover High", Range (800.0f, 8000.0f, 1.0f, 0.4f), 2000.0f, hzToText));
+    params.push_back (fParam (ParamID::frontSatMix, "Front Sat Mix", Range (0.0f, 1.0f, 0.001f), 1.0f, pctToText));
     for (int b = 0; b < 3; ++b)
         for (int s = 0; s < 3; ++s)
             params.push_back (fParam (satParamID (true, bands[b], stages[s]),
@@ -154,6 +163,7 @@ APVTS::ParameterLayout NecronamAudioProcessor::createLayout()
     params.push_back (bParam (ParamID::satActive, "Saturation", false));
     params.push_back (fParam (ParamID::satXLow,  "Xover Low",  Range (60.0f, 800.0f, 1.0f, 0.4f), 250.0f, hzToText));
     params.push_back (fParam (ParamID::satXHigh, "Xover High", Range (800.0f, 8000.0f, 1.0f, 0.4f), 2000.0f, hzToText));
+    params.push_back (fParam (ParamID::satMix, "Sat Mix", Range (0.0f, 1.0f, 0.001f), 1.0f, pctToText));
     for (int b = 0; b < 3; ++b)
         for (int s = 0; s < 3; ++s)
             params.push_back (fParam (satParamID (false, bands[b], stages[s]),
@@ -186,6 +196,16 @@ APVTS::ParameterLayout NecronamAudioProcessor::createLayout()
     params.push_back (bParam (ParamID::ampAMute, "Amp A Mute", false));
     params.push_back (bParam (ParamID::ampBMute, "Amp B Mute", false));
 
+    auto msParam = [&fParam] (const juce::String& id, const juce::String& name)
+    {
+        return fParam (id, name, Range (0.0f, 5.0f, 0.01f), 0.0f,
+                       [] (float v, int) { return juce::String (v, 2) + " ms"; });
+    };
+    params.push_back (bParam (ParamID::ampAPhase, "Amp A Phase", false));
+    params.push_back (bParam (ParamID::ampBPhase, "Amp B Phase", false));
+    params.push_back (msParam (ParamID::ampAAlign, "Amp A Align"));
+    params.push_back (msParam (ParamID::ampBAlign, "Amp B Align"));
+
     // ---- Sag ----
     params.push_back (fParam (ParamID::sagAmount, "Sag", Range (0.0f, 10.0f, 0.1f), 0.0f,
                               [] (float v, int) { return juce::String (v, 1); }));
@@ -195,6 +215,10 @@ APVTS::ParameterLayout NecronamAudioProcessor::createLayout()
     params.push_back (bParam (ParamID::cabBActive, "Cab B", false));
     params.push_back (bParam (ParamID::cabAMute, "Cab A Mute", false));
     params.push_back (bParam (ParamID::cabBMute, "Cab B Mute", false));
+    params.push_back (bParam (ParamID::cabAPhase, "Cab A Phase", false));
+    params.push_back (bParam (ParamID::cabBPhase, "Cab B Phase", false));
+    params.push_back (msParam (ParamID::cabAAlign, "Cab A Align"));
+    params.push_back (msParam (ParamID::cabBAlign, "Cab B Align"));
     params.push_back (fParam (ParamID::cabALevel, "Cab A Level", Range (-40.0f, 12.0f, 0.1f), 0.0f, dbToText));
     params.push_back (fParam (ParamID::cabBLevel, "Cab B Level", Range (-40.0f, 12.0f, 0.1f), 0.0f, dbToText));
 
@@ -256,6 +280,7 @@ void NecronamAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     mCabSum.setSize     (2, samplesPerBlock);
     mCleanDI.setSize    (2, samplesPerBlock);
     mGateBuf.setSize    (2, samplesPerBlock);
+    mSatDry.setSize     (2, samplesPerBlock);
 
     juce::dsp::ProcessSpec monoSpec   { sampleRate, (juce::uint32) samplesPerBlock, 1 };
     juce::dsp::ProcessSpec stereoSpec { sampleRate, (juce::uint32) samplesPerBlock, 2 };
@@ -294,6 +319,18 @@ void NecronamAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
 
     mGateEnv[0] = mGateEnv[1] = 0.0f;
     mGateGain[0] = mGateGain[1] = 1.0f;
+    mGateOpen[0] = mGateOpen[1] = false;
+
+    // Phase-alignment micro-delays (5 ms max; 4096 covers 192 kHz with room).
+    for (int i = 0; i < 2; ++i)
+    {
+        mAmpAlign[i].prepare (monoSpec);
+        mAmpAlign[i].reset();
+        mCabAlign[i].prepare (stereoSpec);
+        mCabAlign[i].reset();
+    }
+    mDIAlign.prepare (stereoSpec);
+    mDIAlign.reset();
 
     for (int a = 0; a < 2; ++a)
     {
@@ -479,9 +516,16 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     if (gateOn)
     {
         const float threshLin = juce::Decibels::decibelsToGain (raw (ParamID::gateThresh));
-        const float envRel = std::exp (-1.0f / (0.050f * (float) mSampleRate));
-        const float openC  = std::exp (-1.0f / (0.005f * (float) mSampleRate));
-        const float closeC = std::exp (-1.0f / (0.100f * (float) mSampleRate));
+        // RELEASE drives both the gain close time and the detector decay; at
+        // the minimum (0.1 ms) the gate slams shut within a few samples —
+        // modern-metal stutter territory. Hysteresis (close threshold 6 dB
+        // under the open threshold) keeps the fast settings from chattering.
+        const float relSec = raw (ParamID::gateRelease) * 0.001f;
+        const float openThresh  = threshLin;
+        const float closeThresh = threshLin * 0.5f;
+        const float envRel = std::exp (-1.0f / (juce::jmax (relSec * 0.4f, 0.0015f) * (float) mSampleRate));
+        const float openC  = std::exp (-1.0f / (0.0015f * (float) mSampleRate));
+        const float closeC = std::exp (-1.0f / (juce::jmax (relSec, 0.00005f) * (float) mSampleRate));
 
         for (int ln = 0; ln < nLanes; ++ln)
         {
@@ -491,7 +535,9 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             {
                 const float a = std::abs (src[i]);
                 mGateEnv[ln] = juce::jmax (a, mGateEnv[ln] * envRel);
-                const float target = mGateEnv[ln] >= threshLin ? 1.0f : 0.0f;
+                if (mGateOpen[ln])  { if (mGateEnv[ln] <  closeThresh) mGateOpen[ln] = false; }
+                else                { if (mGateEnv[ln] >= openThresh)  mGateOpen[ln] = true;  }
+                const float target = mGateOpen[ln] ? 1.0f : 0.0f;
                 const float c = (target < mGateGain[ln]) ? closeC : openC;
                 mGateGain[ln] = target + (mGateGain[ln] - target) * c;
                 gbuf[i] = mGateGain[ln];
@@ -507,6 +553,7 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     {
         mGateEnv[0] = mGateEnv[1] = 0.0f;
         mGateGain[0] = mGateGain[1] = 1.0f;
+        mGateOpen[0] = mGateOpen[1] = false;
     }
     mGateWasActive = gateOn;
 
@@ -524,12 +571,20 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 return p;
             };
             const auto lo = band ("low"), md = band ("mid"), hi = band ("high");
-            const float xl = raw (ParamID::frontSatXLow), xh = raw (ParamID::frontSatXHigh);
+            const float xl  = raw (ParamID::frontSatXLow), xh = raw (ParamID::frontSatXHigh);
+            const float mix = raw (ParamID::frontSatMix);
             for (int ln = 0; ln < nLanes; ++ln)
             {
+                float* data = ln == 0 ? lane0 : lane1;
+                float* dry  = mSatDry.getWritePointer (ln);
+                if (mix < 0.999f)
+                    juce::FloatVectorOperations::copy (dry, data, numSamples);
                 mFrontSat[ln].setCrossovers (xl, xh);
                 mFrontSat[ln].setParams (lo, md, hi);
-                mFrontSat[ln].process (ln == 0 ? lane0 : lane1, numSamples);
+                mFrontSat[ln].process (data, numSamples);
+                if (mix < 0.999f)
+                    for (int i = 0; i < numSamples; ++i)
+                        data[i] = data[i] * mix + dry[i] * (1.0f - mix);
             }
         }
         else if (mFrontSatWasActive)
@@ -599,6 +654,27 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     // seamless un-mute) but its output is silenced at this point in the chain.
     const bool muteA   = raw (ParamID::ampAMute) > 0.5f;
     const bool muteB   = raw (ParamID::ampBMute) > 0.5f;
+    const bool phaseA  = raw (ParamID::ampAPhase) > 0.5f;
+    const bool phaseB  = raw (ParamID::ampBPhase) > 0.5f;
+    const float alignA = raw (ParamID::ampAAlign);
+    const float alignB = raw (ParamID::ampBAlign);
+
+    // Polarity flip + micro-delay phase alignment, applied to an engaged amp
+    // branch's output (mono buffer).
+    auto ampPhaseAlign = [&] (float* buf, bool phase, float alignMs, AlignDelay& dl)
+    {
+        if (phase)
+            juce::FloatVectorOperations::multiply (buf, -1.0f, numSamples);
+        const float dSamp = alignMs * 0.001f * (float) mSampleRate;
+        if (dSamp > 0.01f)
+        {
+            for (int i = 0; i < numSamples; ++i)
+            {
+                dl.pushSample (0, buf[i]);
+                buf[i] = dl.popSample (0, dSamp, true);
+            }
+        }
+    };
 
     float* aOut = mAmpAOut.getWritePointer (0);
     float* bOut = mAmpBOut.getWritePointer (0);
@@ -620,6 +696,7 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         {
             runAmp (mAmp[0], lane0, aOut);
             juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);
+            ampPhaseAlign (aOut, phaseA, alignA, mAmpAlign[0]);
             juce::FloatVectorOperations::copy (busL, aOut, numSamples);
             if (muteA) juce::FloatVectorOperations::clear (busL, numSamples);
         }
@@ -630,6 +707,7 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         {
             runAmp (mAmp[1], lane1, bOut);
             juce::FloatVectorOperations::multiply (bOut, levelB, numSamples);
+            ampPhaseAlign (bOut, phaseB, alignB, mAmpAlign[1]);
             juce::FloatVectorOperations::copy (busR, bOut, numSamples);
             if (muteB) juce::FloatVectorOperations::clear (busR, numSamples);
         }
@@ -647,6 +725,7 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             {
                 runAmp (mAmp[0], mono, aOut);
                 juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);
+                ampPhaseAlign (aOut, phaseA, alignA, mAmpAlign[0]);
                 if (muteA) juce::FloatVectorOperations::clear (aOut, numSamples);
                 juce::FloatVectorOperations::copy (busL, aOut, numSamples);
                 juce::FloatVectorOperations::copy (busR, aOut, numSamples);
@@ -666,6 +745,7 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             {
                 runAmp (mAmp[0], sig, aOut);
                 juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);
+                ampPhaseAlign (aOut, phaseA, alignA, mAmpAlign[0]);
                 if (muteA) juce::FloatVectorOperations::clear (aOut, numSamples);
                 sig = aOut;
             }
@@ -673,6 +753,7 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             {
                 runAmp (mAmp[1], sig, bOut);
                 juce::FloatVectorOperations::multiply (bOut, levelB, numSamples);
+                ampPhaseAlign (bOut, phaseB, alignB, mAmpAlign[1]);
                 if (muteB) juce::FloatVectorOperations::clear (bOut, numSamples);
                 sig = bOut;
             }
@@ -687,6 +768,8 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 runAmp (mAmp[1], mono, bOut);
                 juce::FloatVectorOperations::multiply (aOut, levelA, numSamples);
                 juce::FloatVectorOperations::multiply (bOut, levelB, numSamples);
+                ampPhaseAlign (aOut, phaseA, alignA, mAmpAlign[0]);
+                ampPhaseAlign (bOut, phaseB, alignB, mAmpAlign[1]);
                 if (muteA) juce::FloatVectorOperations::clear (aOut, numSamples);
                 if (muteB) juce::FloatVectorOperations::clear (bOut, numSamples);
 
@@ -708,6 +791,8 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 const bool  mute = aActive ? muteA : muteB;
                 runAmp (mAmp[ai], mono, out);
                 juce::FloatVectorOperations::multiply (out, lvl, numSamples);
+                ampPhaseAlign (out, aActive ? phaseA : phaseB,
+                               aActive ? alignA : alignB, mAmpAlign[ai]);
                 if (mute) juce::FloatVectorOperations::clear (out, numSamples);
                 juce::FloatVectorOperations::copy (busL, out, numSamples);
                 juce::FloatVectorOperations::copy (busR, out, numSamples);
@@ -745,6 +830,24 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         // means silence, not dry; stereo: that channel dies at the cab point).
         const bool muteCabA = raw (ParamID::cabAMute) > 0.5f;
         const bool muteCabB = raw (ParamID::cabBMute) > 0.5f;
+        // Polarity as a sign on the branch gain; alignment as a micro-delay on
+        // the branch (post-convolution).
+        const float signA = raw (ParamID::cabAPhase) > 0.5f ? -1.0f : 1.0f;
+        const float signB = raw (ParamID::cabBPhase) > 0.5f ? -1.0f : 1.0f;
+        const float cabAlignA = raw (ParamID::cabAAlign);
+        const float cabAlignB = raw (ParamID::cabBAlign);
+
+        auto alignBuf = [&] (float* buf, AlignDelay& dl, int ch, float alignMs)
+        {
+            const float dSamp = alignMs * 0.001f * (float) mSampleRate;
+            if (dSamp <= 0.01f)
+                return;
+            for (int i = 0; i < numSamples; ++i)
+            {
+                dl.pushSample (ch, buf[i]);
+                buf[i] = dl.popSample (ch, dSamp, true);
+            }
+        };
 
         auto convolveCab = [&] (int c) -> const float*   // returns scratch chans
         {
@@ -776,7 +879,8 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                     convolveCab (0);
                     juce::FloatVectorOperations::copyWithMultiply (
                         sumL, mCabScratch.getReadPointer (0),
-                        juce::Decibels::decibelsToGain (raw (ParamID::cabALevel)), numSamples);
+                        signA * juce::Decibels::decibelsToGain (raw (ParamID::cabALevel)), numSamples);
+                    alignBuf (sumL, mCabAlign[0], 0, cabAlignA);
                 }
             }
             if (bOn)
@@ -788,7 +892,8 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                     convolveCab (1);
                     juce::FloatVectorOperations::copyWithMultiply (
                         sumR, mCabScratch.getReadPointer (1),
-                        juce::Decibels::decibelsToGain (raw (ParamID::cabBLevel)), numSamples);
+                        signB * juce::Decibels::decibelsToGain (raw (ParamID::cabBLevel)), numSamples);
+                    alignBuf (sumR, mCabAlign[1], 1, cabAlignB);
                 }
             }
             juce::FloatVectorOperations::copy (busL, sumL, numSamples);
@@ -804,14 +909,18 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             if (aOn && ! muteCabA)
             {
                 convolveCab (0);
-                const float g = juce::Decibels::decibelsToGain (raw (ParamID::cabALevel));
+                alignBuf (mCabScratch.getWritePointer (0), mCabAlign[0], 0, cabAlignA);
+                alignBuf (mCabScratch.getWritePointer (1), mCabAlign[0], 1, cabAlignA);
+                const float g = signA * juce::Decibels::decibelsToGain (raw (ParamID::cabALevel));
                 juce::FloatVectorOperations::addWithMultiply (sumL, mCabScratch.getReadPointer (0), g, numSamples);
                 juce::FloatVectorOperations::addWithMultiply (sumR, mCabScratch.getReadPointer (1), g, numSamples);
             }
             if (bOn && ! muteCabB)
             {
                 convolveCab (1);
-                const float g = juce::Decibels::decibelsToGain (raw (ParamID::cabBLevel));
+                alignBuf (mCabScratch.getWritePointer (0), mCabAlign[1], 0, cabAlignB);
+                alignBuf (mCabScratch.getWritePointer (1), mCabAlign[1], 1, cabAlignB);
+                const float g = signB * juce::Decibels::decibelsToGain (raw (ParamID::cabBLevel));
                 juce::FloatVectorOperations::addWithMultiply (sumL, mCabScratch.getReadPointer (0), g, numSamples);
                 juce::FloatVectorOperations::addWithMultiply (sumR, mCabScratch.getReadPointer (1), g, numSamples);
             }
@@ -853,12 +962,19 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 return p;
             };
             const auto lo = band ("low"), md = band ("mid"), hi = band ("high");
-            const float xl = raw (ParamID::satXLow), xh = raw (ParamID::satXHigh);
+            const float xl  = raw (ParamID::satXLow), xh = raw (ParamID::satXHigh);
+            const float mix = raw (ParamID::satMix);
             for (int ch = 0; ch < 2; ++ch)
             {
+                float* dry = mSatDry.getWritePointer (ch);
+                if (mix < 0.999f)
+                    juce::FloatVectorOperations::copy (dry, busCh[ch], numSamples);
                 mSaturation[ch].setCrossovers (xl, xh);
                 mSaturation[ch].setParams (lo, md, hi);
                 mSaturation[ch].process (busCh[ch], numSamples);
+                if (mix < 0.999f)
+                    for (int i = 0; i < numSamples; ++i)
+                        busCh[ch][i] = busCh[ch][i] * mix + dry[i] * (1.0f - mix);
             }
         }
         else if (mPostSatWasActive)
@@ -993,6 +1109,23 @@ void NecronamAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         const float cb = raw (ParamID::cleanBlend);
         if (cb > 1.0e-4f)
         {
+            // Optional micro-delay on the DI so it lines up with the wet path
+            // (cab IRs carry a few ms of mic-distance onset delay).
+            const float alignMs = raw (ParamID::cleanAlign);
+            const float dSamp   = alignMs * 0.001f * (float) mSampleRate;
+            if (dSamp > 0.01f)
+            {
+                for (int ch = 0; ch < 2; ++ch)
+                {
+                    float* di = mCleanDI.getWritePointer (ch);
+                    for (int i = 0; i < numSamples; ++i)
+                    {
+                        mDIAlign.pushSample (ch, di[i]);
+                        di[i] = mDIAlign.popSample (ch, dSamp, true);
+                    }
+                }
+            }
+
             const float wetG = std::cos (cb * 0.5f * juce::MathConstants<float>::pi);
             const float clnG = std::sin (cb * 0.5f * juce::MathConstants<float>::pi);
             const float* diL = mCleanDI.getReadPointer (0);

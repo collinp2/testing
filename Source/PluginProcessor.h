@@ -107,6 +107,7 @@ public:
     struct ParamID
     {
         // Master / IO
+        static constexpr auto cleanAlign   = "clean_align";    // DI alignment for the clean blend (ms)
         static constexpr auto inputLevel   = "input_level";
         static constexpr auto namOutput    = "nam_output";     // amp-bus trim
         static constexpr auto outputLevel  = "output_level";
@@ -119,11 +120,13 @@ public:
         static constexpr auto gateThresh   = "gate_threshold";
         static constexpr auto gateActive   = "gate_active";
         static constexpr auto gatePosition = "gate_position";  // Pre Amp / Post Amp
+        static constexpr auto gateRelease  = "gate_release";   // ms; fastest = instant
 
         // Flesh Render PRE (front)
         static constexpr auto frontSatActive = "fsat_active";
         static constexpr auto frontSatXLow   = "fsat_xlow";
         static constexpr auto frontSatXHigh  = "fsat_xhigh";
+        static constexpr auto frontSatMix    = "fsat_mix";     // wet/dry
         // fs_{low,mid,high}_{sat,dist,fuzz} generated.
 
         // Drive section (switchable circuit)
@@ -154,6 +157,11 @@ public:
         // so its mute is moot).
         static constexpr auto ampAMute     = "amp_a_mute";
         static constexpr auto ampBMute     = "amp_b_mute";
+        // Polarity invert + micro-delay phase alignment per amp branch.
+        static constexpr auto ampAPhase    = "amp_a_phase";
+        static constexpr auto ampBPhase    = "amp_b_phase";
+        static constexpr auto ampAAlign    = "amp_a_align";    // ms, 0..5
+        static constexpr auto ampBAlign    = "amp_b_align";
         static constexpr auto quality      = "quality";
 
         // Sag
@@ -164,6 +172,10 @@ public:
         static constexpr auto cabBActive   = "cab_b_active";
         static constexpr auto cabAMute     = "cab_a_mute";     // kill switch (see amp mutes)
         static constexpr auto cabBMute     = "cab_b_mute";
+        static constexpr auto cabAPhase    = "cab_a_phase";
+        static constexpr auto cabBPhase    = "cab_b_phase";
+        static constexpr auto cabAAlign    = "cab_a_align";    // ms, 0..5
+        static constexpr auto cabBAlign    = "cab_b_align";
         static constexpr auto cabALevel    = "cab_a_level";
         static constexpr auto cabBLevel    = "cab_b_level";
 
@@ -184,6 +196,7 @@ public:
         static constexpr auto satActive    = "sat_active";
         static constexpr auto satXLow      = "sat_xlow";
         static constexpr auto satXHigh     = "sat_xhigh";
+        static constexpr auto satMix       = "sat_mix";        // wet/dry
         // {low,mid,high}_{sat,dist,fuzz} generated.
 
         // Post filters
@@ -277,10 +290,22 @@ private:
     float mLowCutCachedFreq = -1.0f;
 
     // Gate: envelopes per lane; per-sample gains buffered so the gain can be
-    // applied pre OR post amp (always keyed from the direct signal).
+    // applied pre OR post amp (always keyed from the direct signal). Open
+    // state carries the hysteresis (close threshold sits below the open one
+    // so lightning-fast release settings don't chatter).
     float mGateEnv[2]  { 0.0f, 0.0f };
     float mGateGain[2] { 1.0f, 1.0f };
+    bool  mGateOpen[2] { false, false };
     juce::AudioBuffer<float> mGateBuf;
+
+    // ----- Phase alignment micro-delays (0..5 ms, fractional) ----------------
+    using AlignDelay = juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear>;
+    AlignDelay mAmpAlign[2] { AlignDelay { 4096 }, AlignDelay { 4096 } };   // mono, per amp branch
+    AlignDelay mCabAlign[2] { AlignDelay { 4096 }, AlignDelay { 4096 } };   // stereo, per cab branch
+    AlignDelay mDIAlign { 4096 };                                           // stereo, clean blend
+
+    // ----- Saturation wet/dry scratch ----------------------------------------
+    juce::AudioBuffer<float> mSatDry;
 
     // ----- Post-chain DSP (stereo) --------------------------------------------
     SagProcessor   mSag;

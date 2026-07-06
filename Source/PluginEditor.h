@@ -129,9 +129,11 @@ private:
     std::unique_ptr<ComboAttach> outputModeAttach;
     LevelMeter       inMeter, namOutMeter, masterMeter;
     juce::Slider*    inputKnob = nullptr;          // master input level (chain start)
+    juce::Slider*    diAlignKnob = nullptr;        // clean-blend DI alignment
 
     // ---- PRE tab ----
     juce::Slider* gateKnob = nullptr;
+    juce::Slider* gateReleaseKnob = nullptr;
     juce::TextButton* gateToggle = nullptr;
     juce::ComboBox   gatePosBox;
     std::unique_ptr<ComboAttach> gatePosAttach;
@@ -139,6 +141,7 @@ private:
     juce::TextButton* frontSatToggle = nullptr;
     juce::Slider* frontXLowKnob = nullptr;
     juce::Slider* frontXHighKnob = nullptr;
+    juce::Slider* frontSatMixKnob = nullptr;
     std::array<juce::Slider*, 9> frontSatKnobs {};
 
     juce::TextButton* driveToggle = nullptr;
@@ -177,6 +180,10 @@ private:
     juce::TextButton* ampBToggle = nullptr;
     juce::TextButton* ampAMuteToggle = nullptr;
     juce::TextButton* ampBMuteToggle = nullptr;
+    juce::TextButton* ampAPhaseToggle = nullptr;
+    juce::TextButton* ampBPhaseToggle = nullptr;
+    juce::Slider* ampAAlignKnob = nullptr;
+    juce::Slider* ampBAlignKnob = nullptr;
     juce::Slider qualitySlider;
 
     juce::Slider* sagKnob = nullptr;
@@ -189,8 +196,12 @@ private:
     juce::TextButton* cabBToggle = nullptr;
     juce::TextButton* cabAMuteToggle = nullptr;
     juce::TextButton* cabBMuteToggle = nullptr;
+    juce::TextButton* cabAPhaseToggle = nullptr;
+    juce::TextButton* cabBPhaseToggle = nullptr;
     juce::Slider* cabALevelKnob = nullptr;
     juce::Slider* cabBLevelKnob = nullptr;
+    juce::Slider* cabAAlignSlider = nullptr;
+    juce::Slider* cabBAlignSlider = nullptr;
 
     // ---- POST tab ----
     juce::TextButton* eqToggle = nullptr;
@@ -204,6 +215,7 @@ private:
     juce::TextButton* satToggle = nullptr;
     juce::Slider* satXLowKnob = nullptr;
     juce::Slider* satXHighKnob = nullptr;
+    juce::Slider* satMixKnob = nullptr;
     std::array<juce::Slider*, 9> satKnobs {};
 
     juce::Slider* hpfKnob = nullptr;

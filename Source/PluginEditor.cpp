@@ -66,7 +66,8 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     // =====================================================================
     // MASTER STRIP (persistent — untagged so every tab shows it)
     // =====================================================================
-    inputKnob = &addKnob (-1, ID::inputLevel, "INPUT");
+    inputKnob   = &addKnob (-1, ID::inputLevel, "INPUT");
+    diAlignKnob = &addKnob (-1, ID::cleanAlign, "DI ALIGN");
 
     masterFader.setSliderStyle (juce::Slider::LinearVertical);
     masterFader.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 66, 17);
@@ -95,16 +96,18 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     // =====================================================================
     // PRE tab — gate, Flesh Render pre, drive, low cut
     // =====================================================================
-    gateKnob   = &addKnob (TabPre, ID::gateThresh, "GATE THR");
-    gateToggle = &addToggle (TabPre, ID::gateActive, "On");
+    gateKnob        = &addKnob (TabPre, ID::gateThresh,  "THRESH");
+    gateReleaseKnob = &addKnob (TabPre, ID::gateRelease, "RELEASE");
+    gateToggle      = &addToggle (TabPre, ID::gateActive, "On");
     content.addAndMakeVisible (gatePosBox);
     assignTab (gatePosBox, TabPre);
     gatePosBox.addItemList ({ "Pre Amp", "Post Amp" }, 1);
     gatePosAttach = std::make_unique<ComboAttach> (processor.apvts, ID::gatePosition, gatePosBox);
 
-    frontSatToggle = &addToggle (TabPre, ID::frontSatActive, "On");
-    frontXLowKnob  = &addKnob (TabPre, ID::frontSatXLow,  "X-LOW");
-    frontXHighKnob = &addKnob (TabPre, ID::frontSatXHigh, "X-HIGH");
+    frontSatToggle  = &addToggle (TabPre, ID::frontSatActive, "On");
+    frontXLowKnob   = &addKnob (TabPre, ID::frontSatXLow,  "X-LOW");
+    frontXHighKnob  = &addKnob (TabPre, ID::frontSatXHigh, "X-HIGH");
+    frontSatMixKnob = &addKnob (TabPre, ID::frontSatMix,   "MIX");
 
     driveToggle = &addToggle (TabPre, ID::driveActive, "On");
     content.addAndMakeVisible (driveCircuitBox);
@@ -191,6 +194,10 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     ampBMuteToggle = &addToggle (TabAmpCab, ID::ampBMute, "M");
     ampAMuteToggle->getProperties().set ("bright", true);
     ampBMuteToggle->getProperties().set ("bright", true);
+    ampAPhaseToggle = &addToggle (TabAmpCab, ID::ampAPhase, juce::String::fromUTF8 ("\xc3\x98"));
+    ampBPhaseToggle = &addToggle (TabAmpCab, ID::ampBPhase, juce::String::fromUTF8 ("\xc3\x98"));
+    ampAAlignKnob = &addKnob (TabAmpCab, ID::ampAAlign, "ALIGN A");
+    ampBAlignKnob = &addKnob (TabAmpCab, ID::ampBAlign, "ALIGN B");
 
     qualitySlider.setSliderStyle (juce::Slider::LinearHorizontal);
     qualitySlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 104, 18);
@@ -225,8 +232,12 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     cabBMuteToggle = &addToggle (TabAmpCab, ID::cabBMute, "M");
     cabAMuteToggle->getProperties().set ("bright", true);
     cabBMuteToggle->getProperties().set ("bright", true);
-    cabALevelKnob = &addHSlider (TabAmpCab, ID::cabALevel);
-    cabBLevelKnob = &addHSlider (TabAmpCab, ID::cabBLevel);
+    cabAPhaseToggle = &addToggle (TabAmpCab, ID::cabAPhase, juce::String::fromUTF8 ("\xc3\x98"));
+    cabBPhaseToggle = &addToggle (TabAmpCab, ID::cabBPhase, juce::String::fromUTF8 ("\xc3\x98"));
+    cabALevelKnob  = &addHSlider (TabAmpCab, ID::cabALevel);
+    cabBLevelKnob  = &addHSlider (TabAmpCab, ID::cabBLevel);
+    cabAAlignSlider = &addHSlider (TabAmpCab, ID::cabAAlign);
+    cabBAlignSlider = &addHSlider (TabAmpCab, ID::cabBAlign);
 
     // =====================================================================
     // POST tab — EQ, compressor, Flesh Render post, filters
@@ -246,9 +257,10 @@ NecronamAudioProcessorEditor::NecronamAudioProcessorEditor (NecronamAudioProcess
     content.addAndMakeVisible (grMeter);
     assignTab (grMeter, TabPost);
 
-    satToggle   = &addToggle (TabPost, ID::satActive, "On");
+    satToggle    = &addToggle (TabPost, ID::satActive, "On");
     satXLowKnob  = &addKnob (TabPost, ID::satXLow,  "X-LOW");
     satXHighKnob = &addKnob (TabPost, ID::satXHigh, "X-HIGH");
+    satMixKnob   = &addKnob (TabPost, ID::satMix,   "MIX");
     for (int b = 0; b < 3; ++b)
         for (int s = 0; s < 3; ++s)
             satKnobs[(size_t) (b * 3 + s)] =
@@ -568,6 +580,7 @@ void NecronamAudioProcessorEditor::timerCallback()
     for (juce::Component* comp : { (juce::Component*) ampBLevelKnob, (juce::Component*) &loadModelBButton,
                                    (juce::Component*) &clearModelBButton, (juce::Component*) &modelBNameLabel,
                                    (juce::Component*) ampBToggle, (juce::Component*) ampBMuteToggle,
+                                   (juce::Component*) ampBPhaseToggle, (juce::Component*) ampBAlignKnob,
                                    (juce::Component*) &prevBButton, (juce::Component*) &nextBButton })
         setEn (*comp, bUsed);
     setEn (*spreadKnob, spreadUsed);
@@ -705,7 +718,7 @@ void NecronamAudioProcessorEditor::paintContent (juce::Graphics& g)
         title (driveArea,    "DRIVE");
         title (gateArea,     "GATE");
         title (lowCutArea,   "LOW CUT");
-        drawSatBands (frontSatArea, frontSatArea.getWidth() - 28 - 220);
+        drawSatBands (frontSatArea, frontSatArea.getWidth() - 28 - 252);
 
         const auto db = driveCircuitBox.getBounds();
         if (! db.isEmpty())
@@ -738,6 +751,20 @@ void NecronamAudioProcessorEditor::paintContent (juce::Graphics& g)
             g.drawText ("CAB B", juce::Rectangle<int> (loadIRBButton.getX(), loadIRBButton.getY() - 14, 120, 12),
                         juce::Justification::centredLeft);
 
+        // LEVEL / ALIGN captions beside the cab sliders.
+        g.setColour (c (COL_BONE));
+        g.setFont (monoFont (9.0f));
+        auto sliderCaption = [&] (juce::Slider* s, const char* text)
+        {
+            if (s != nullptr && ! s->getBounds().isEmpty())
+                g.drawText (text, juce::Rectangle<int> (s->getX() - 52, s->getY(), 48, s->getHeight()),
+                            juce::Justification::centredRight);
+        };
+        sliderCaption (cabALevelKnob,   "LEVEL");
+        sliderCaption (cabAAlignSlider, "ALIGN");
+        sliderCaption (cabBLevelKnob,   "LEVEL");
+        sliderCaption (cabBAlignSlider, "ALIGN");
+
         // Quality hints.
         if (! qualityLabelArea.isEmpty())
         {
@@ -760,7 +787,7 @@ void NecronamAudioProcessorEditor::paintContent (juce::Graphics& g)
         title (compArea,    "COMPRESSOR  -  LA-2A STYLE");
         title (postSatArea, "FLESH RENDER POST  -  MULTIBAND SATURATION");
         title (filterArea,  "FILTERS");
-        drawSatBands (postSatArea, postSatArea.getWidth() - 28 - 220);
+        drawSatBands (postSatArea, postSatArea.getWidth() - 28 - 252);
     }
     else if (currentTab == TabFx)
     {
@@ -796,7 +823,7 @@ void NecronamAudioProcessorEditor::paintContent (juce::Graphics& g)
     // Footer.
     g.setColour (c (COL_BONE));
     g.setFont (monoFont (10.0f));
-    g.drawText ("CP SOFTWARE  -  NECRONAM MAX v2.0  -  NEURAL AMP NECROMANCY",
+    g.drawText ("CP SOFTWARE  -  NECRONAM MAX v2.1  -  NEURAL AMP NECROMANCY",
                 juce::Rectangle<int> (0, kBaseH - 26, w, 22), juce::Justification::centred);
 
     HorrorLookAndFeel::drawGrainTexture (g, juce::Rectangle<int> (0, 0, kBaseW, kBaseH));
@@ -863,12 +890,15 @@ void NecronamAudioProcessorEditor::layoutContent()
         inRow.removeFromRight (4);
         inputKnob->setBounds (inRow);
 
-        // Bottom: output mode + clean blend.
+        // Bottom: output mode + clean blend + DI alignment.
         outputModeBox.setBounds (m.removeFromBottom (24));
         m.removeFromBottom (14);                     // caption
         auto cleanArea = m.removeFromBottom (72);
         cleanKnob.setBounds (cleanArea.reduced (8, 0));
         m.removeFromBottom (14);                     // caption
+        auto diArea = m.removeFromBottom (58);
+        diAlignKnob->setBounds (diArea.reduced (14, 0));
+        m.removeFromBottom (16);                     // DI ALIGN label (attached)
         m.removeFromBottom (4);
 
         // Middle: master meter + fader.
@@ -880,15 +910,17 @@ void NecronamAudioProcessorEditor::layoutContent()
 
     bodyArea = area;
 
-    // Lays out a Flesh Render panel: 3x3 stage grid left, crossover pair right.
+    // Lays out a Flesh Render panel: 3x3 stage grid left; crossovers + wet/dry
+    // mix on the right.
     auto layoutFR = [] (juce::Rectangle<int> a, const std::array<juce::Slider*, 9>& knobs,
-                        juce::TextButton& toggle, juce::Slider& xlow, juce::Slider& xhigh)
+                        juce::TextButton& toggle, juce::Slider& xlow, juce::Slider& xhigh,
+                        juce::Slider& mix)
     {
         auto s = a.reduced (14);
         toggle.setBounds (s.removeFromTop (24).removeFromRight (70));
         s.removeFromTop (16);                        // band captions (painted)
         s.removeFromTop (18);                        // knob label room
-        auto xover = s.removeFromRight (220);
+        auto xover = s.removeFromRight (252);
         const int cw = s.getWidth() / 3;
         for (int b = 0; b < 3; ++b)
         {
@@ -897,10 +929,11 @@ void NecronamAudioProcessorEditor::layoutContent()
             for (int st = 0; st < 3; ++st)
                 knobs[(size_t) (b * 3 + st)]->setBounds (col.removeFromLeft (kw).reduced (4));
         }
-        xover.removeFromLeft (16);
-        const int xw = xover.getWidth() / 2;
-        xlow.setBounds  (xover.removeFromLeft (xw).reduced (4));
-        xhigh.setBounds (xover.reduced (4));
+        xover.removeFromLeft (12);
+        const int xw = xover.getWidth() / 3;
+        xlow.setBounds  (xover.removeFromLeft (xw).reduced (3));
+        xhigh.setBounds (xover.removeFromLeft (xw).reduced (3));
+        mix.setBounds   (xover.reduced (3));
     };
 
     // ===== PRE tab =====
@@ -915,7 +948,7 @@ void NecronamAudioProcessorEditor::layoutContent()
         row2.removeFromLeft (12);
         lowCutArea = row2;
 
-        layoutFR (frontSatArea, frontSatKnobs, *frontSatToggle, *frontXLowKnob, *frontXHighKnob);
+        layoutFR (frontSatArea, frontSatKnobs, *frontSatToggle, *frontXLowKnob, *frontXHighKnob, *frontSatMixKnob);
 
         {
             auto d = driveArea.reduced (14);
@@ -946,7 +979,10 @@ void NecronamAudioProcessorEditor::layoutContent()
             auto gt = gateArea.reduced (14);
             gt.removeFromTop (22);
             gt.removeFromTop (16);                   // knob label room
-            gateKnob->setBounds (gt.removeFromTop (84).reduced (28, 0));
+            auto knobRow = gt.removeFromTop (84);
+            const int kw = knobRow.getWidth() / 2;
+            gateKnob->setBounds        (knobRow.removeFromLeft (kw).reduced (2, 0));
+            gateReleaseKnob->setBounds (knobRow.reduced (2, 0));
             gt.removeFromTop (4);
             gateToggle->setBounds (gt.removeFromTop (24).reduced (30, 0));
             gt.removeFromTop (16);                   // POSITION caption (painted)
@@ -987,6 +1023,7 @@ void NecronamAudioProcessorEditor::layoutContent()
             nextAButton.setBounds (rowA.removeFromLeft (22)); rowA.removeFromLeft (6);
             clearModelAButton.setBounds (rowA.removeFromRight (24)); rowA.removeFromRight (4);
             ampAMuteToggle->setBounds (rowA.removeFromRight (30)); rowA.removeFromRight (4);
+            ampAPhaseToggle->setBounds (rowA.removeFromRight (30)); rowA.removeFromRight (4);
             ampAToggle->setBounds (rowA.removeFromRight (40)); rowA.removeFromRight (4);
             modelANameLabel.setBounds (rowA);
             m.removeFromTop (5);
@@ -996,6 +1033,7 @@ void NecronamAudioProcessorEditor::layoutContent()
             nextBButton.setBounds (rowB.removeFromLeft (22)); rowB.removeFromLeft (6);
             clearModelBButton.setBounds (rowB.removeFromRight (24)); rowB.removeFromRight (4);
             ampBMuteToggle->setBounds (rowB.removeFromRight (30)); rowB.removeFromRight (4);
+            ampBPhaseToggle->setBounds (rowB.removeFromRight (30)); rowB.removeFromRight (4);
             ampBToggle->setBounds (rowB.removeFromRight (40)); rowB.removeFromRight (4);
             modelBNameLabel.setBounds (rowB);
 
@@ -1007,12 +1045,14 @@ void NecronamAudioProcessorEditor::layoutContent()
 
             m.removeFromTop (18);                    // knob label room
             auto knobRow = m.removeFromTop (86);
-            const int kw = knobRow.getWidth() / 5;
-            spreadKnob->setBounds    (knobRow.removeFromLeft (kw).reduced (4, 0));
-            ampALevelKnob->setBounds (knobRow.removeFromLeft (kw).reduced (4, 0));
-            ampBLevelKnob->setBounds (knobRow.removeFromLeft (kw).reduced (4, 0));
-            inputCalKnob->setBounds  (knobRow.removeFromLeft (kw).reduced (4, 0));
-            ampOutKnob->setBounds    (knobRow.reduced (4, 0));
+            const int kw = knobRow.getWidth() / 7;
+            spreadKnob->setBounds    (knobRow.removeFromLeft (kw).reduced (3, 0));
+            ampALevelKnob->setBounds (knobRow.removeFromLeft (kw).reduced (3, 0));
+            ampBLevelKnob->setBounds (knobRow.removeFromLeft (kw).reduced (3, 0));
+            ampAAlignKnob->setBounds (knobRow.removeFromLeft (kw).reduced (3, 0));
+            ampBAlignKnob->setBounds (knobRow.removeFromLeft (kw).reduced (3, 0));
+            inputCalKnob->setBounds  (knobRow.removeFromLeft (kw).reduced (3, 0));
+            ampOutKnob->setBounds    (knobRow.reduced (3, 0));
 
             m.removeFromTop (6);
             qualityLabelArea = m.removeFromTop (14);
@@ -1034,20 +1074,26 @@ void NecronamAudioProcessorEditor::layoutContent()
             auto blockB = cb;
 
             auto irBlock = [] (juce::Rectangle<int> block, juce::TextButton& load, juce::TextButton& clear,
-                               juce::TextButton& on, juce::TextButton& mute, juce::Label& name, juce::Slider& level)
+                               juce::TextButton& on, juce::TextButton& mute, juce::TextButton& phase,
+                               juce::Label& name, juce::Slider& level, juce::Slider& align)
             {
                 block.removeFromTop (14);            // CAB A/B caption (painted)
                 auto top = block.removeFromTop (26);
                 load.setBounds (top.removeFromLeft (100)); top.removeFromLeft (6);
                 clear.setBounds (top.removeFromLeft (26)); top.removeFromLeft (8);
                 on.setBounds (top.removeFromLeft (44));    top.removeFromLeft (4);
+                phase.setBounds (top.removeFromLeft (30)); top.removeFromLeft (4);
                 mute.setBounds (top.removeFromLeft (30));  top.removeFromLeft (8);
                 name.setBounds (top);
-                block.removeFromTop (8);
-                level.setBounds (block.removeFromTop (22));
+                block.removeFromTop (6);
+                level.setBounds (block.removeFromTop (22).withTrimmedLeft (52));  // "LEVEL" caption painted
+                block.removeFromTop (4);
+                align.setBounds (block.removeFromTop (22).withTrimmedLeft (52));  // "ALIGN" caption painted
             };
-            irBlock (blockA, loadIRAButton, clearIRAButton, *cabAToggle, *cabAMuteToggle, irANameLabel, *cabALevelKnob);
-            irBlock (blockB, loadIRBButton, clearIRBButton, *cabBToggle, *cabBMuteToggle, irBNameLabel, *cabBLevelKnob);
+            irBlock (blockA, loadIRAButton, clearIRAButton, *cabAToggle, *cabAMuteToggle, *cabAPhaseToggle,
+                     irANameLabel, *cabALevelKnob, *cabAAlignSlider);
+            irBlock (blockB, loadIRBButton, clearIRBButton, *cabBToggle, *cabBMuteToggle, *cabBPhaseToggle,
+                     irBNameLabel, *cabBLevelKnob, *cabBAlignSlider);
         }
     }
 
@@ -1075,7 +1121,7 @@ void NecronamAudioProcessorEditor::layoutContent()
             for (int i = 0; i < n; ++i)
                 eqSliders[(size_t) i]->setBounds (e.removeFromLeft (sw).reduced (6, 2));
         }
-        layoutFR (postSatArea, satKnobs, *satToggle, *satXLowKnob, *satXHighKnob);
+        layoutFR (postSatArea, satKnobs, *satToggle, *satXLowKnob, *satXHighKnob, *satMixKnob);
         {
             auto cp = compArea.reduced (14);
             compToggle->setBounds (cp.removeFromTop (22).removeFromRight (70));
