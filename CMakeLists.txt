@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(FleshRender VERSION 1.0.0 LANGUAGES C CXX OBJCXX)
+project(FleshRender VERSION 2.0.0 LANGUAGES C CXX OBJCXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED YES)
@@ -37,7 +37,8 @@ juce_add_plugin(FleshRender
     COPY_PLUGIN_AFTER_BUILD     FALSE
     PLUGIN_MANUFACTURER_CODE    Void
     PLUGIN_CODE                 Flsh
-    FORMATS                     VST3 Standalone AAX
+    FORMATS                     VST3 AU Standalone AAX
+    AU_MAIN_TYPE                "kAudioUnitType_Effect"
     PRODUCT_NAME                "Flesh Render"
     DESCRIPTION                 "Multiband Saturation, Distortion & Fuzz"
     BUNDLE_ID                   "com.voidcraftaudio.fleshrender"

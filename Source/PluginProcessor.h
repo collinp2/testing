@@ -1,21 +1,30 @@
 #pragma once
 #include <JuceHeader.h>
+#include "NeveEQ.h"
+#include "Api560EQ.h"
 
 //==============================================================================
-// FleshRenderProcessor
+// FleshRenderProcessor  (v2)
 //
-// Multiband Saturation / Distortion / Fuzz VST3 plugin.
+// Signal chain (all minimum-phase IIR / per-sample waveshaping — ZERO latency,
+// no oversampling, every section skipped entirely when it would do nothing):
 //
-// Signal path per band:
-//   input --> LR4 crossover filters --> saturation --> distortion --> fuzz --> sum
+//   input
+//     --> NEVE 1073/74-STYLE EQ   (HPF + low shelf + mid bell + 12k shelf)
+//     --> MULTIBAND SATURATION    (LR4 split, SWEEPABLE crossovers,
+//                                  sat -> drive -> fuzz per band, v2 realistic
+//                                  level-compensated curves, wet/dry MIX)
+//     --> API-560 GRAPHIC EQ      (10 octave bands, +-12 dB, proportional Q)
+//     --> post HI-PASS / LO-PASS
+//     --> master OUTPUT LEVEL (smoothed) --> peak meter tap
 //
-// Crossover frequencies:
-//   Low  band :     DC … 250 Hz
-//   Mid  band : 250 Hz … 2 kHz
-//   High band : 2 kHz … 20 kHz
-//
-// Linkwitz-Riley 4th-order (LR4) crossovers are implemented as two cascaded
-// 2nd-order Butterworth IIR sections at the same corner frequency.
+// v2 stage voicings (ported from NECRONAM MAX, each level-compensated so
+// engaging a stage doesn't jump the volume):
+//   SAT   — tape / transformer: tanh with a small bias for gentle even
+//           harmonics; soft, warm, compresses peaks.
+//   DRIVE — plain soft clipping (arctangent): smooth odd-harmonic overdrive.
+//           (parameter ids remain *_dist for session compatibility)
+//   FUZZ  — Big Muff style: two cascaded high-gain clipping stages.
 //==============================================================================
 class FleshRenderProcessor : public juce::AudioProcessor
 {
@@ -24,12 +33,10 @@ public:
     ~FleshRenderProcessor() override;
 
     //==========================================================================
-    // AudioProcessor overrides
-    //==========================================================================
     void prepareToPlay   (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
     void processBlock    (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
-    using AudioProcessor::processBlock; // avoid hiding the default no-op overload
+    using AudioProcessor::processBlock;
 
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
@@ -49,90 +56,91 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    //==========================================================================
-    // Parameter tree
+    // Output meter tap (peak since last read, linear). Read+reset by the editor.
+    float fetchOutputPeak() { return outputPeak.exchange (0.0f); }
+
     //==========================================================================
     juce::AudioProcessorValueTreeState apvts;
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-private:
     //==========================================================================
-    // DSP types
+    // Waveshaping (v2 voicing, level-compensated) — shared with the editor for
+    // any future curve displays.
     //==========================================================================
-    using Filter    = juce::dsp::IIR::Filter<float>;
-    using Coeffs    = juce::dsp::IIR::Coefficients<float>;
-    using FilterDup = juce::dsp::ProcessorDuplicator<Filter, Coeffs>;
-
-    // LR4 low-pass at 250 Hz  (stage1 × stage2 = 4th-order Butterworth LP)
-    FilterDup lowLP1, lowLP2;
-
-    // LR4 high-pass at 250 Hz for mid/high bands
-    FilterDup midHP1, midHP2;
-
-    // LR4 low-pass at 2 kHz for low/mid bands
-    FilterDup midLP1, midLP2;
-
-    // LR4 high-pass at 2 kHz for high band
-    FilterDup highHP1, highHP2;
-
-    // Temporary buffers — one per band, filled each block
-    juce::AudioBuffer<float> lowBuf, midBuf, highBuf;
-
-    double currentSampleRate = 44100.0;
-
-    std::atomic<float>* outputLevelParam = nullptr;
-    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> outputGainSmoothed;
-
-    //==========================================================================
-    // Waveshaping functions
-    //==========================================================================
-
-    // Soft saturation — tanh waveshaper normalised to unity at full drive.
-    // drive range maps amount 0…1 to 1x…20x pre-gain.
     static inline float applySaturation (float x, float amount) noexcept
     {
         if (amount < 1e-4f) return x;
-        const float drive  = 1.0f + amount * 19.0f;          // 1 … 20
-        const float norm   = 1.0f / std::tanh (drive);
-        return std::tanh (x * drive) * norm;
+        const float drive = 1.0f + amount * 7.0f;             // 1 .. 8 (tape range)
+        const float bias  = amount * 0.18f;                    // even-harmonic tilt
+        const float norm  = 1.0f / std::tanh (drive);
+        float y = (std::tanh (drive * x + bias) - std::tanh (bias)) * norm;
+        return y * std::pow (drive, -0.45f) * (1.0f + amount * 0.35f);
     }
 
-    // Distortion — atan waveshaper, approaches square-wave at high drive.
-    // drive range maps amount 0…1 to 1x…100x.
     static inline float applyDistortion (float x, float amount) noexcept
     {
         if (amount < 1e-4f) return x;
-        const float drive = std::pow (100.0f, amount);        // 1 … 100
-        return (2.0f / juce::MathConstants<float>::pi) * std::atan (x * drive);
+        const float drive = std::pow (30.0f, amount);          // 1 .. 30
+        float y = (2.0f / juce::MathConstants<float>::pi) * std::atan (x * drive);
+        return y * std::pow (drive, -0.5f) * (1.0f + amount * 0.6f);
     }
 
-    // Fuzz — asymmetric hard-clip with DC bias for one-sided velcro character.
-    // drive range maps amount 0…1 to 1x…200x.
     static inline float applyFuzz (float x, float amount) noexcept
     {
         if (amount < 1e-4f) return x;
-        const float drive = std::pow (200.0f, amount);        // 1 … 200
-        const float bias  = amount * 0.25f;                   // slight asymmetric push
-
-        float driven = x * drive + bias;
-
-        // Hard positive clip, slightly softer negative clip
-        if (driven >  1.0f)  driven =  1.0f;
-        if (driven < -0.75f) driven = -0.75f;
-
-        // Remove most of the added bias from output
-        return driven - bias * 0.6f;
+        const float g = 1.0f + amount * 60.0f;                 // 1 .. 61
+        float y = std::tanh (x * g);                           // stage 1: soft
+        y = std::tanh (y * 2.2f);                              // stage 2: driven again
+        y = juce::jlimit (-0.88f, 0.88f, y * 1.35f);           // diode pair to the rails
+        return y * std::pow (g, -0.40f) * (1.0f + amount * 0.8f);
     }
 
-    // Apply the full chain (sat → dist → fuzz) to a single sample
-    static inline float processChain (float x,
-                                       float sat, float dist, float fuzz) noexcept
+    static inline float processChain (float x, float sat, float dist, float fuzz) noexcept
     {
         x = applySaturation (x, sat);
         x = applyDistortion (x, dist);
         x = applyFuzz        (x, fuzz);
         return x;
     }
+
+private:
+    //==========================================================================
+    using Filter    = juce::dsp::IIR::Filter<float>;
+    using Coeffs    = juce::dsp::IIR::Coefficients<float>;
+    using FilterDup = juce::dsp::ProcessorDuplicator<Filter, Coeffs>;
+
+    void updateCrossovers (float lowMidHz, float midHighHz);
+
+    // ---- Pre EQ (Neve 1073/74 style) ----------------------------------------
+    NeveEQ neveEQ;
+
+    // ---- Multiband crossovers (LR4, sweepable) ------------------------------
+    FilterDup lowLP1, lowLP2;
+    FilterDup midHP1, midHP2;
+    FilterDup midLP1, midLP2;
+    FilterDup highHP1, highHP2;
+    float xoverLowCached  = -1.0f;
+    float xoverHighCached = -1.0f;
+    bool  bandsWereActive = false;   // reset the split filters on re-engage
+
+    juce::AudioBuffer<float> lowBuf, midBuf, highBuf;
+    juce::AudioBuffer<float> dryBuf;                 // wet/dry MIX scratch
+
+    // ---- Post EQ (API-560 style, one instance per channel) ------------------
+    Api560EQ geq[2];
+
+    // ---- Post filters ---------------------------------------------------------
+    FilterDup postHPF, postLPF;
+    float postHpfCached = -1.0f;
+    float postLpfCached = -1.0f;
+
+    double currentSampleRate = 44100.0;
+
+    std::atomic<float>* outputLevelParam = nullptr;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> outputGainSmoothed;
+
+    // Output peak accumulator (read+reset by the editor's meter timer).
+    std::atomic<float> outputPeak { 0.0f };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FleshRenderProcessor)
 };

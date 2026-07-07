@@ -26,7 +26,7 @@ BandPanel::BandPanel()
     };
 
     configureLabel (satLabel,  "SATURATION");
-    configureLabel (distLabel, "DISTORTION");
+    configureLabel (distLabel, "DRIVE");
     configureLabel (fuzzLabel, "FUZZ");
 }
 
