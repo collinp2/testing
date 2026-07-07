@@ -21,7 +21,7 @@ endif()
 # ============================================================================
 
 # OBJCXX is required for the AAX SDK's Objective-C++ sources on macOS.
-project(NECRONAM_MAX VERSION 2.2.0 LANGUAGES C CXX OBJCXX)
+project(NECRONAM_MAX VERSION 2.2.1 LANGUAGES C CXX OBJCXX)
 
 # NAM core requires C++20; JUCE is happy with it too.
 set(CMAKE_CXX_STANDARD 20)
