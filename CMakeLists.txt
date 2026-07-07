@@ -20,7 +20,8 @@ endif()
 #  CP Software. JUCE + NeuralAmpModelerCore.
 # ============================================================================
 
-project(NECRONAM_MAX VERSION 2.2.0 LANGUAGES C CXX)
+# OBJCXX is required for the AAX SDK's Objective-C++ sources on macOS.
+project(NECRONAM_MAX VERSION 2.2.0 LANGUAGES C CXX OBJCXX)
 
 # NAM core requires C++20; JUCE is happy with it too.
 set(CMAKE_CXX_STANDARD 20)
@@ -70,6 +71,27 @@ if(NOT NAM_CORE_SOURCES)
 endif()
 
 # ----------------------------------------------------------------------------
+# AAX (native) — enabled only when the Avid AAX SDK is present locally, so CI
+# machines without the SDK still build VST3 / AU / Standalone. Unsigned AAX
+# loads in Pro Tools Developer; retail Pro Tools needs PACE signing once
+# registered with Avid. (AAX DSP — the HDX TI-chip flavour — is not possible:
+# JUCE has no DSP support and NAM inference can't run on those chips.)
+# ----------------------------------------------------------------------------
+set(AAX_SDK_PATH "$ENV{HOME}/Downloads/aax-sdk-2-9-0" CACHE PATH "Path to Avid AAX SDK")
+set(NMAX_FORMATS VST3 AU Standalone)
+if(EXISTS "${AAX_SDK_PATH}")
+    juce_set_aax_sdk_path("${AAX_SDK_PATH}")
+    set(AAX_BUILD_EXAMPLES         OFF CACHE BOOL "" FORCE)
+    set(AAX_BUILD_TI_INTERFACE     OFF CACHE BOOL "" FORCE)
+    set(AAX_BUILD_JUCE_GUI_EXTENSION OFF CACHE BOOL "" FORCE)
+    add_subdirectory("${AAX_SDK_PATH}" "${CMAKE_BINARY_DIR}/aax-sdk" EXCLUDE_FROM_ALL)
+    list(APPEND NMAX_FORMATS AAX)
+    message(STATUS "NECRONAM MAX: AAX SDK found - building AAX (native)")
+else()
+    message(STATUS "NECRONAM MAX: AAX SDK not found at ${AAX_SDK_PATH} - skipping AAX")
+endif()
+
+# ----------------------------------------------------------------------------
 # Plugin target
 # ----------------------------------------------------------------------------
 # Install system-wide on macOS (/Library) instead of the per-user folder.
@@ -88,7 +110,7 @@ juce_add_plugin(NECRONAM_MAX
     DESCRIPTION              "Neural Amp Necromancy MAX — dual-amp NAM player, stereo dual-IR cab, EQ & saturation"
     PLUGIN_MANUFACTURER_CODE  Cpsw
     PLUGIN_CODE               NcMx
-    FORMATS                   VST3 AU Standalone
+    FORMATS                   ${NMAX_FORMATS}
     IS_SYNTH                  FALSE
     NEEDS_MIDI_INPUT          FALSE
     NEEDS_MIDI_OUTPUT         FALSE
@@ -132,6 +154,10 @@ target_include_directories(NECRONAM_MAX PRIVATE
 target_include_directories(NECRONAM_MAX SYSTEM PRIVATE
     "${NAM_DEPS}/eigen"
 )
+
+if(EXISTS "${AAX_SDK_PATH}")
+    target_link_libraries(NECRONAM_MAX PRIVATE AAXLibrary)
+endif()
 
 target_link_libraries(NECRONAM_MAX PRIVATE
     NecronamMaxAssets
