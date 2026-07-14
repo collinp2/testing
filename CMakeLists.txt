@@ -6,7 +6,7 @@ if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_ARCHITECTURES)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS universal build")
 endif()
 
-project(FleshRender VERSION 2.0.0 LANGUAGES C CXX)
+project(FleshRender VERSION 2.0.1 LANGUAGES C CXX)
 
 # Objective-C++ only exists on Apple toolchains (needed by the JUCE/AAX
 # wrappers there); declaring it unconditionally breaks Windows CI.
