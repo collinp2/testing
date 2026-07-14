@@ -20,8 +20,13 @@ endif()
 #  CP Software. JUCE + NeuralAmpModelerCore.
 # ============================================================================
 
-# OBJCXX is required for the AAX SDK's Objective-C++ sources on macOS.
-project(NECRONAM_MAX VERSION 2.2.1 LANGUAGES C CXX OBJCXX)
+project(NECRONAM_MAX VERSION 2.2.2 LANGUAGES C CXX)
+
+# Objective-C++ only exists on Apple toolchains (needed by the JUCE/AAX
+# wrappers there); declaring it unconditionally breaks Linux/Windows CI.
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
 
 # NAM core requires C++20; JUCE is happy with it too.
 set(CMAKE_CXX_STANDARD 20)
